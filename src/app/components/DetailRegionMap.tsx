@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import SeoulSvg from "../../imports/simple/11.svg?raw";
 import BusanSvg from "../../imports/simple/26.svg?raw";
@@ -53,10 +53,12 @@ interface DetailRegionMapProps {
   colorScaleMax: number;
   onSubRegionClick: (subId: string, subName: string) => void; 
   selectedSubRegion: string | null;
+  selectedCompareSubRegions?: string[];
 }
 
-export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, selectedSubRegion }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, selectedSubRegion, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number }[]>([]);
 
   const svgContent = useMemo(() => {
     const raw = regionSvgMap[regionId] || "";
@@ -86,12 +88,13 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       const visitors = subRegionData[id] || 0;
       const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
       const isSelected = selectedSubRegion === id;
+      const isCompareSelected = selectedCompareSubRegions.includes(id);
 
       styles += `
         svg [id="${id}"] {
           fill: ${heatmapColor} !important;
-          stroke: ${isSelected ? "#1e3a8a" : "#ffffff"} !important;
-          stroke-width: ${isSelected ? "3px" : "0.5px"} !important;
+          stroke: ${isCompareSelected ? "#16a34a" : isSelected ? "#1e3a8a" : "#ffffff"} !important;
+          stroke-width: ${isCompareSelected || isSelected ? "3px" : "0.5px"} !important;
           transition: fill 0.3s ease;
           cursor: pointer;
         }
@@ -102,7 +105,33 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       `;
     });
     return styles;
-  }, [subRegionData, selectedSubRegion, colorScaleMax]);
+  }, [subRegionData, selectedSubRegion, colorScaleMax, selectedCompareSubRegions]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const container = mapContainerRef.current;
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const markers = selectedCompareSubRegions
+        .map((id) => {
+          const regionElement = container.querySelector<SVGGraphicsElement>(`[id="${id}"]`);
+          if (!regionElement) return null;
+
+          const rect = regionElement.getBoundingClientRect();
+          return {
+            id,
+            x: rect.left + rect.width / 2 - containerRect.left,
+            y: rect.top + rect.height / 2 - containerRect.top,
+          };
+        })
+        .filter((marker): marker is { id: string; x: number; y: number } => Boolean(marker));
+
+      setCheckMarkers(markers);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [svgContent, selectedCompareSubRegions]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-transparent overflow-hidden">
@@ -133,6 +162,18 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
         }}
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
+
+      <div className="absolute left-1/2 top-[calc(50%+1.5rem)] z-30 w-full max-w-[450px] h-[80%] -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+        {checkMarkers.map((marker) => (
+          <div
+            key={marker.id}
+            className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-white flex items-center justify-center text-base font-black"
+            style={{ left: marker.x, top: marker.y }}
+          >
+            ✓
+          </div>
+        ))}
+      </div>
 
       {/* 범례 */}
       <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">

@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { Calendar } from "lucide-react";
+import { Calendar, Check, ShoppingCart } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
@@ -65,6 +65,13 @@ const generateAccommodationData = (targetId: string, startDate: string, endDate:
   })).sort((a, b) => b.value - a.value);
 };
 
+type CompareRegion = {
+  id: string;
+  name: string;
+  provinceId: string;
+  provinceName: string;
+};
+
 export function MainPage() {
   const navigate = useNavigate();
   const [currentViewLevel, setCurrentViewLevel] = useState<string>("national");
@@ -74,6 +81,8 @@ export function MainPage() {
   // 
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
 
   const MIN_YEAR = 2023;
   const TOTAL_MONTHS = 36;
@@ -133,6 +142,38 @@ export function MainPage() {
   const accommodationData = useMemo(() => generateAccommodationData(selectedSubRegion || currentViewLevel, startDate, endDate), [selectedSubRegion, currentViewLevel, startDate, endDate]);
 
   const showAccommodation = currentViewLevel !== "national" && selectedSubRegion !== null;
+  const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
+  const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
+
+  const handleSubRegionSelect = (subId: string, subName: string) => {
+    setSelectedSubRegion(subId);
+    setSelectedSubRegionName(subName);
+
+    if (!isCompareMode) return;
+
+    setCompareRegions((prev) => {
+      if (prev.some((region) => region.id === subId)) {
+        return prev.filter((region) => region.id !== subId);
+      }
+
+      if (prev.length >= 3) return prev;
+
+      return [
+        ...prev,
+        {
+          id: subId,
+          name: subName,
+          provinceId: currentViewLevel,
+          provinceName: currentProvinceName,
+        },
+      ];
+    });
+  };
+
+  const goToComparePage = () => {
+    if (compareRegions.length < 2) return;
+    navigate("/compare", { state: { regions: compareRegions } });
+  };
 
   const handlePointerDown = (index: 0 | 1) => (e: React.PointerEvent) => {
     e.preventDefault();
@@ -165,12 +206,72 @@ export function MainPage() {
       <button
         onClick={() => navigate("/calendar")}
         className="fixed left-8 bottom-8 w-16 h-16 bg-white rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 border-gray-200 hover:border-blue-500 z-50"
+        aria-label="캘린더로 이동"
       >
         <Calendar className="w-8 h-8 text-blue-600" />
       </button>
 
+      <div className="fixed right-8 bottom-8 z-50">
+        <button
+          onClick={goToComparePage}
+          disabled={compareRegions.length < 2}
+          className="w-16 h-16 bg-white rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 border-gray-200 hover:border-blue-500 disabled:opacity-45 disabled:hover:border-gray-200 disabled:cursor-not-allowed"
+          aria-label="선택 지역 비교 페이지로 이동"
+          title="선택 지역 비교"
+        >
+          <span className="w-10 h-10 rounded-full border-2 border-blue-600 text-blue-600 flex items-center justify-center text-sm font-black tracking-tight">
+            VS
+          </span>
+        </button>
+      </div>
+
       {/* 지도 영역 */}
       <div className="absolute left-[3%] top-1/2 -translate-y-1/2 w-[40%] h-[85%] bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+        <div className="absolute right-5 top-5 z-40 flex flex-col items-end gap-3">
+          <button
+            onClick={() => setIsCompareMode((prev) => !prev)}
+            className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+              isCompareMode
+                ? "bg-emerald-500 border-emerald-400"
+                : "bg-white border-gray-200 hover:border-emerald-500"
+            }`}
+            aria-label="비교 장바구니"
+            title="비교 장바구니"
+          >
+            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-emerald-600"}`} />
+            {compareRegions.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
+                {compareRegions.length}
+              </span>
+            )}
+          </button>
+
+          {isCompareMode && (
+            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-emerald-100 p-3">
+              <div className="flex justify-end mb-2">
+                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                  {compareRegions.length}/3
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {compareRegions.length === 0 ? (
+                  <p className="text-[11px] text-gray-500 leading-4">지도에서 선택</p>
+                ) : (
+                  compareRegions.map((region) => (
+                    <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
+                        <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {currentViewLevel === "national" ? (
           <KoreaMap
             onRegionClick={(id) => {
@@ -194,11 +295,9 @@ export function MainPage() {
             }}
             visitorData={subRegionVisitorData}
             colorScaleMax={subRegionVisitorScaleMax}
-            onSubRegionClick={(subId, subName) => {
-              setSelectedSubRegion(subId);
-              setSelectedSubRegionName(subName); // 구역 이름 저장
-            }}
+            onSubRegionClick={handleSubRegionSelect}
             selectedSubRegion={selectedSubRegion}
+            selectedCompareSubRegions={compareRegionIds}
           />
         )}
       </div>
