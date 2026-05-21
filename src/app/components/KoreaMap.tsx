@@ -7,6 +7,7 @@ interface KoreaMapProps {
   onRegionHover: (region: string | null) => void; 
   selectedRegion: string | null;
   visitorData: { [key: string]: number };
+  colorScaleMax: number;
 }
 
 const regionsInfo = [
@@ -22,23 +23,18 @@ const regionsInfo = [
 ];
 
 // Color Intensity 
-const getHeatmapColor = (value: number, min: number, max: number): string => {
-  if (min === max) return `rgba(255, 99, 91, 0.5)`; // 기본 
-  const normalized = (value - min) / (max - min || 1);
+const getHeatmapColor = (value: number, max: number): string => {
+  const normalized = Math.max(0, Math.min(1, value / (max || 1)));
   const opacity = 0.15 + normalized * 0.85; // 최소 투명도 15% ~ 최대 100%
   return `rgba(255, 99, 91, ${opacity})`;
 };
 
 const formatVisitorsInMan = (value: number) => `${Math.round(value / 10000).toLocaleString()}만명`;
 
-export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
-
-  const visitorValues = Object.values(visitorData);
-  const minVisitors = Math.min(...visitorValues, 0);
-  const maxVisitors = Math.max(...visitorValues, 1);
 
   useEffect(() => {
     if (KoreaMapSvgRaw) {
@@ -53,7 +49,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
     let styles = "";
     regionsInfo.forEach((region) => {
       const visitors = visitorData[region.id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, minVisitors, maxVisitors);
+      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
 
@@ -68,7 +64,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
       `;
     });
     return styles;
-  }, [visitorData, selectedRegion, hoveredRegion, minVisitors, maxVisitors]);
+  }, [visitorData, selectedRegion, hoveredRegion, colorScaleMax]);
 
   const validIds = regionsInfo.map(r => r.id);
 
@@ -126,7 +122,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
             style={{ background: "linear-gradient(to top, rgba(255, 99, 91, 0.15), rgba(255, 99, 91, 1))" }}
           />
           <div className="flex h-36 flex-col justify-between text-[11px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(maxVisitors)}</span>
+            <span>{formatVisitorsInMan(colorScaleMax)}</span>
             <span>0명</span>
           </div>
         </div>

@@ -33,9 +33,8 @@ const regionNames: Record<string, string> = {
 };
 
 // Color Intensity 
-const getHeatmapColor = (value: number, min: number, max: number): string => {
-  if (min === max) return `rgba(37, 99, 235, 0.5)`;
-  const normalized = (value - min) / (max - min || 1);
+const getHeatmapColor = (value: number, max: number): string => {
+  const normalized = Math.max(0, Math.min(1, value / (max || 1)));
   const opacity = 0.15 + normalized * 0.85;
   return `rgba(255, 99, 91, ${opacity})`;
 };
@@ -46,11 +45,12 @@ interface DetailRegionMapProps {
   regionId: string;
   onBack: () => void;
   visitorData: Record<string, number>;
+  colorScaleMax: number;
   onSubRegionClick: (subId: string, subName: string) => void; 
   selectedSubRegion: string | null;
 }
 
-export function DetailRegionMap({ regionId, onBack, visitorData, onSubRegionClick, selectedSubRegion }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, selectedSubRegion }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [subRegionMap, setSubRegionMap] = useState<Record<string, string>>({});
 
@@ -74,18 +74,11 @@ export function DetailRegionMap({ regionId, onBack, visitorData, onSubRegionClic
 
   const subRegionData = visitorData;
 
-  const renderedVisitorValues = useMemo(
-    () => subRegionIds.map((id) => subRegionData[id] || 0),
-    [subRegionIds, subRegionData],
-  );
-  const minV = useMemo(() => (renderedVisitorValues.length ? Math.min(...renderedVisitorValues) : 0), [renderedVisitorValues]);
-  const maxV = useMemo(() => (renderedVisitorValues.length ? Math.max(...renderedVisitorValues) : 1), [renderedVisitorValues]);
-
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
       const visitors = subRegionData[id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, minV, maxV);
+      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
       const isSelected = selectedSubRegion === id;
 
       styles += `
@@ -103,7 +96,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, onSubRegionClic
       `;
     });
     return styles;
-  }, [subRegionData, selectedSubRegion, minV, maxV]);
+  }, [subRegionData, selectedSubRegion, colorScaleMax]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-transparent overflow-hidden">
@@ -144,7 +137,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, onSubRegionClic
             style={{ background: "linear-gradient(to top, rgba(255, 99, 91, 0.15), rgba(255, 99, 91, 1))" }}
           />
           <div className="flex h-36 flex-col justify-between text-[11px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(maxV)}</span>
+            <span>{formatVisitorsInMan(colorScaleMax)}</span>
             <span>0명</span>
           </div>
         </div>

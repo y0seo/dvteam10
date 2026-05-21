@@ -4,7 +4,12 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
-import { getDistrictVisitorTotals, getProvinceVisitorTotals } from "../data/visitorData";
+import {
+  getDistrictVisitorScaleMax,
+  getDistrictVisitorTotals,
+  getProvinceVisitorScaleMax,
+  getProvinceVisitorTotals,
+} from "../data/visitorData";
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -114,6 +119,11 @@ export function MainPage() {
     () => getDistrictVisitorTotals(currentViewLevel, startMonth, endMonth),
     [currentViewLevel, startMonth, endMonth],
   );
+  const provinceVisitorScaleMax = useMemo(() => getProvinceVisitorScaleMax(), []);
+  const subRegionVisitorScaleMax = useMemo(
+    () => getDistrictVisitorScaleMax(currentViewLevel),
+    [currentViewLevel],
+  );
   
   const activeDisplayRegion = currentViewLevel === "national"
     ? (hoveredRegion || selectedRegion || "seoul")
@@ -173,6 +183,7 @@ export function MainPage() {
             onRegionHover={setHoveredRegion}
             selectedRegion={selectedRegion}
             visitorData={visitorData}
+            colorScaleMax={provinceVisitorScaleMax}
           />
         ) : (
           <DetailRegionMap 
@@ -183,6 +194,7 @@ export function MainPage() {
               setSelectedSubRegionName(null); // 초기화
             }}
             visitorData={subRegionVisitorData}
+            colorScaleMax={subRegionVisitorScaleMax}
             onSubRegionClick={(subId, subName) => {
               setSelectedSubRegion(subId);
               setSelectedSubRegionName(subName); // 구역 이름 저장

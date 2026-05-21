@@ -87,3 +87,13 @@ export function getDistrictVisitorTotals(regionId: string, startMonth: string, e
 
   return totals;
 }
+
+export function getProvinceVisitorScaleMax() {
+  const totals = getProvinceVisitorTotals("2023-01", "2025-12");
+  return Math.max(...Object.values(totals), 1);
+}
+
+export function getDistrictVisitorScaleMax(regionId: string) {
+  const totals = getDistrictVisitorTotals(regionId, "2023-01", "2025-12");
+  return Math.max(...Object.values(totals), 1);
+}
