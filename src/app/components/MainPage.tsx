@@ -5,7 +5,6 @@ import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import {
-  getDistrictVisitorScaleMax,
   getDistrictVisitorTotals,
   getProvinceVisitorScaleMax,
   getProvinceVisitorTotals,
@@ -121,8 +120,8 @@ export function MainPage() {
   );
   const provinceVisitorScaleMax = useMemo(() => getProvinceVisitorScaleMax(), []);
   const subRegionVisitorScaleMax = useMemo(
-    () => getDistrictVisitorScaleMax(currentViewLevel),
-    [currentViewLevel],
+    () => Math.max(...Object.values(subRegionVisitorData), 1),
+    [subRegionVisitorData],
   );
   
   const activeDisplayRegion = currentViewLevel === "national"

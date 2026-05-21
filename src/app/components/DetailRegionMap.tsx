@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useMemo, useRef } from "react";
 
 import SeoulSvg from "../../imports/simple/11.svg?raw";
 import BusanSvg from "../../imports/simple/26.svg?raw";
@@ -41,6 +41,11 @@ const getHeatmapColor = (value: number, max: number): string => {
 
 const formatVisitorsInMan = (value: number) => `${Math.round(value / 10000).toLocaleString()}만명`;
 
+const getSvgAttribute = (tag: string, attribute: string) => {
+  const match = tag.match(new RegExp(`${attribute}="([^"]+)"`));
+  return match?.[1] || "";
+};
+
 interface DetailRegionMapProps {
   regionId: string;
   onBack: () => void;
@@ -52,22 +57,23 @@ interface DetailRegionMapProps {
 
 export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, selectedSubRegion }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [subRegionMap, setSubRegionMap] = useState<Record<string, string>>({});
 
   const svgContent = useMemo(() => {
     const raw = regionSvgMap[regionId] || "";
-    return raw.replace(/width="[0-9.]+"/g, 'width="100%"').replace(/height="[0-9.]+"/g, 'height="100%"');
+    return raw
+      .replace(/width="[0-9.]+"/g, 'width="100%"')
+      .replace(/height="[0-9.]+"/g, 'height="100%"')
+      .replace(/\sfill="[^"]*"/g, "");
   }, [regionId]);
 
-  useEffect(() => {
-    if (mapContainerRef.current && svgContent) {
-      const paths = Array.from(mapContainerRef.current.querySelectorAll("path"));
-      const mapping: Record<string, string> = {};
-      paths.forEach(p => {
-        if (p.id) mapping[p.id] = p.getAttribute("name") || p.getAttribute("title") || p.id;
-      });
-      setSubRegionMap(mapping);
-    }
+  const subRegionMap = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    const pathTags = svgContent.match(/<path\b[^>]*>/g) || [];
+    pathTags.forEach((tag) => {
+      const id = getSvgAttribute(tag, "id");
+      if (id) mapping[id] = getSvgAttribute(tag, "name") || getSvgAttribute(tag, "title") || id;
+    });
+    return mapping;
   }, [svgContent]);
 
   const subRegionIds = useMemo(() => Object.keys(subRegionMap), [subRegionMap]);
