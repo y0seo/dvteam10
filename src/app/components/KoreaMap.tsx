@@ -29,6 +29,8 @@ const getHeatmapColor = (value: number, min: number, max: number): string => {
   return `rgba(255, 99, 91, ${opacity})`;
 };
 
+const formatVisitorsInMan = (value: number) => `${Math.round(value / 10000).toLocaleString()}만명`;
+
 export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
@@ -117,6 +119,20 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
       />
 
       <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">
+        <p className="text-xs font-bold text-gray-700 mb-3">외국인 방문자수</p>
+        <div className="flex items-stretch gap-3">
+          <div
+            className="w-4 h-36 rounded-full border border-red-100"
+            style={{ background: "linear-gradient(to top, rgba(255, 99, 91, 0.15), rgba(255, 99, 91, 1))" }}
+          />
+          <div className="flex h-36 flex-col justify-between text-[11px] font-semibold text-gray-600">
+            <span>{formatVisitorsInMan(maxVisitors)}</span>
+            <span>0명</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">
         <p className="text-xs font-bold text-gray-700 mb-3">방문객 밀집도</p>
         <div className="flex items-center gap-2 mb-2">
           <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "rgba(255, 99, 91, 0.2)" }}></div>

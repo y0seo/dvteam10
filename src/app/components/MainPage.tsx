@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
+import { getDistrictVisitorTotals, getProvinceVisitorTotals } from "../data/visitorData";
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -70,20 +71,49 @@ export function MainPage() {
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
 
-  const [sliderValues, setSliderValues] = useState<[number, number]>([10, 90]);
-  const MIN_DATE = new Date("2023-01-01").getTime();
-  const MAX_DATE = new Date("2025-12-31").getTime();
+  const MIN_YEAR = 2023;
+  const TOTAL_MONTHS = 36;
+  const MAX_MONTH_INDEX = TOTAL_MONTHS - 1;
+  const [sliderValues, setSliderValues] = useState<[number, number]>([0, MAX_MONTH_INDEX]);
 
-  const getDateFromPercent = (percent: number) => {
-    const time = MIN_DATE + (MAX_DATE - MIN_DATE) * (percent / 100);
-    return new Date(time).toISOString().split('T')[0];
+  const getMonthInfo = (monthIndex: number) => {
+    const year = MIN_YEAR + Math.floor(monthIndex / 12);
+    const month = (monthIndex % 12) + 1;
+    return { year, month };
   };
 
-  const startDate = getDateFromPercent(sliderValues[0]);
-  const endDate = getDateFromPercent(sliderValues[1]);
-  const dateSeedForDetail = new Date(startDate).getTime() * 0.0001 + new Date(endDate).getTime() * 0.0001;
+  const getMonthStartDate = (monthIndex: number) => {
+    const { year, month } = getMonthInfo(monthIndex);
+    return `${year}-${String(month).padStart(2, "0")}-01`;
+  };
 
-  const visitorData = useMemo(() => generateRegionVisitorData(startDate, endDate), [startDate, endDate]);
+  const getMonthEndDate = (monthIndex: number) => {
+    const { year, month } = getMonthInfo(monthIndex);
+    const lastDay = new Date(year, month, 0).getDate();
+    return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  };
+
+  const getMonthLabel = (monthIndex: number) => {
+    const { year, month } = getMonthInfo(monthIndex);
+    return `${year}년 ${month}월`;
+  };
+
+  const getSliderPercent = (monthIndex: number) => (monthIndex / MAX_MONTH_INDEX) * 100;
+
+  const startMonth = getMonthStartDate(sliderValues[0]).slice(0, 7);
+  const endMonth = getMonthStartDate(sliderValues[1]).slice(0, 7);
+  const startDate = getMonthStartDate(sliderValues[0]);
+  const endDate = getMonthEndDate(sliderValues[1]);
+  const startMonthLabel = getMonthLabel(sliderValues[0]);
+  const endMonthLabel = getMonthLabel(sliderValues[1]);
+  const visitorData = useMemo(
+    () => getProvinceVisitorTotals(startMonth, endMonth),
+    [startMonth, endMonth],
+  );
+  const subRegionVisitorData = useMemo(
+    () => getDistrictVisitorTotals(currentViewLevel, startMonth, endMonth),
+    [currentViewLevel, startMonth, endMonth],
+  );
   
   const activeDisplayRegion = currentViewLevel === "national"
     ? (hoveredRegion || selectedRegion || "seoul")
@@ -102,12 +132,13 @@ export function MainPage() {
     const onPointerMove = (moveEvent: PointerEvent) => {
       const rect = sliderEl.getBoundingClientRect();
       let percent = ((moveEvent.clientX - rect.left) / rect.width) * 100;
-      percent = Math.max(0, Math.min(100, percent)); 
+      percent = Math.max(0, Math.min(100, percent));
+      const monthIndex = Math.round((percent / 100) * MAX_MONTH_INDEX);
       setSliderValues(prev => {
         const newVals: [number, number] = [...prev] as [number, number];
-        newVals[index] = percent;
-        if (index === 0 && newVals[0] > newVals[1] - 2) newVals[0] = newVals[1] - 2;
-        if (index === 1 && newVals[1] < newVals[0] + 2) newVals[1] = newVals[0] + 2;
+        newVals[index] = monthIndex;
+        if (index === 0 && newVals[0] > newVals[1]) newVals[0] = newVals[1];
+        if (index === 1 && newVals[1] < newVals[0]) newVals[1] = newVals[0];
         return newVals;
       });
     };
@@ -151,7 +182,7 @@ export function MainPage() {
               setSelectedSubRegion(null);
               setSelectedSubRegionName(null); // 초기화
             }}
-            dateSeed={dateSeedForDetail}
+            visitorData={subRegionVisitorData}
             onSubRegionClick={(subId, subName) => {
               setSelectedSubRegion(subId);
               setSelectedSubRegionName(subName); // 구역 이름 저장
@@ -168,9 +199,9 @@ export function MainPage() {
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h3 className="text-base font-bold text-gray-800 mb-8">기간 선택 (2023 - 2025)</h3>
           <div className="relative w-full h-3 bg-gray-200 rounded-full mb-10 mt-2">
-            <div className="absolute h-full bg-blue-500 rounded-full pointer-events-none transition-all duration-75" style={{ left: `${sliderValues[0]}%`, width: `${sliderValues[1] - sliderValues[0]}%` }} />
-            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-blue-600 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${sliderValues[0]}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(0)} />
-            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-red-500 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${sliderValues[1]}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(1)} />
+            <div className="absolute h-full bg-blue-500 rounded-full pointer-events-none transition-all duration-75" style={{ left: `${getSliderPercent(sliderValues[0])}%`, width: `${getSliderPercent(sliderValues[1]) - getSliderPercent(sliderValues[0])}%` }} />
+            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-blue-600 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[0])}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(0)} />
+            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-red-500 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[1])}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(1)} />
             <div className="absolute left-0 top-6 text-xs font-semibold text-gray-400">2023</div>
             <div className="absolute left-1/2 top-6 text-xs font-semibold text-gray-400 -translate-x-1/2">2024</div>
             <div className="absolute right-0 top-6 text-xs font-semibold text-gray-400">2025</div>
@@ -178,11 +209,11 @@ export function MainPage() {
           <div className="flex justify-between gap-4 mt-2">
             <div className="flex-1 bg-blue-50 p-3 rounded-lg border border-blue-100">
               <div className="text-xs text-blue-600 font-bold mb-1">시작일</div>
-              <div className="text-sm font-semibold text-blue-900">{startDate}</div>
+              <div className="text-sm font-semibold text-blue-900">{startMonthLabel}</div>
             </div>
             <div className="flex-1 bg-red-50 p-3 rounded-lg border border-red-100">
               <div className="text-xs text-red-600 font-bold mb-1">종료일</div>
-              <div className="text-sm font-semibold text-red-900">{endDate}</div>
+              <div className="text-sm font-semibold text-red-900">{endMonthLabel}</div>
             </div>
           </div>
         </div>
