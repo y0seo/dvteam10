@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { Calendar, Check, ShoppingCart } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
@@ -9,6 +9,12 @@ import {
   getProvinceVisitorScaleMax,
   getProvinceVisitorTotals,
 } from "../data/visitorData";
+import {
+  COMPANION_COLORS,
+  COMPANION_KEYS,
+  getCompanionByCountry,
+  pickCompanionYear,
+} from "../data/companionData";
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -32,7 +38,7 @@ const generateRegionVisitorData = (startDate: string, endDate: string) => {
 };
 
 const generateCountryData = (targetId: string, startDate: string, endDate: string) => {
-  const countries = ["중국", "일본", "미국", "태국", "베트남", "필리핀", "대만", "홍콩", "스웨덴", "러시아"];
+  const countries = ["중국", "일본", "미국", "태국", "베트남", "필리핀", "대만", "홍콩", "싱가포르", "러시아"];
   let idSeed = 0;
   for (let i = 0; i < targetId.length; i++) idSeed += targetId.charCodeAt(i);
   const dateSeed = new Date(startDate).getTime() * 0.00005 + new Date(endDate).getTime() * 0.00005;
@@ -43,15 +49,6 @@ const generateCountryData = (targetId: string, startDate: string, endDate: strin
       value: Math.floor((Math.sin(finalSeed + i * 1.5) + 1) * 8000) + 1000,
     }))
     .sort((a, b) => b.value - a.value);
-};
-
-const generateCompanionData = (startDate: string, endDate: string) => {
-  const types = ["친구", "배우자", "자녀", "부모님", "혼자", "기타"];
-  const dateSeed = new Date(startDate).getTime() * 0.00005 + new Date(endDate).getTime() * 0.00005;
-  return types.map((type, i) => ({
-    name: type,
-    value: Math.floor((Math.sin(dateSeed + i * 2.1) + 1) * 5000) + 500,
-  })).sort((a, b) => b.value - a.value);
 };
 
 const generateAccommodationData = (targetId: string, startDate: string, endDate: string) => {
@@ -72,6 +69,24 @@ type CompareRegion = {
   provinceName: string;
 };
 
+type RoomType = "싱글" | "더블" | "트윈" | "패밀리";
+const ROOM_ORDER: RoomType[] = ["싱글", "더블", "트윈", "패밀리"];
+const ROOM_BY_COMPANION: Record<string, RoomType> = {
+  "친구": "트윈",
+  "배우자/파트너": "더블",
+  "자녀": "패밀리",
+  "그외 가족/친지": "패밀리",
+  "부모님": "패밀리",
+  "직장동료": "트윈",
+  "기타": "싱글",
+};
+const ROOM_COLORS: Record<RoomType, string> = {
+  싱글: "#9ca3af",
+  더블: "#10b981",
+  트윈: "#3b82f6",
+  패밀리: "#ec4899",
+};
+
 export function MainPage() {
   const navigate = useNavigate();
   const [currentViewLevel, setCurrentViewLevel] = useState<string>("national");
@@ -83,6 +98,13 @@ export function MainPage() {
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
+  const [highlightedCountry, setHighlightedCountry] = useState<string | null>(null);
+  const [sortKeys, setSortKeys] = useState<typeof COMPANION_KEYS[number][] | null>(null);
+  const [hoverData, setHoverData] = useState<{
+    country: string;
+    pct: Record<string, number>;
+    raw: Record<string, number>;
+  } | null>(null);
 
   const MIN_YEAR = 2023;
   const TOTAL_MONTHS = 36;
@@ -138,8 +160,164 @@ export function MainPage() {
     : (selectedSubRegion || currentViewLevel);
 
   const chartData = useMemo(() => generateCountryData(activeDisplayRegion, startDate, endDate), [activeDisplayRegion, startDate, endDate]);
-  const companionData = useMemo(() => generateCompanionData(startDate, endDate), [startDate, endDate]);
   const accommodationData = useMemo(() => generateAccommodationData(selectedSubRegion || currentViewLevel, startDate, endDate), [selectedSubRegion, currentViewLevel, startDate, endDate]);
+
+  const companionYear = useMemo(() => pickCompanionYear(endMonth), [endMonth]);
+  const companionStackData = useMemo(() => getCompanionByCountry(companionYear), [companionYear]);
+
+  const companionTop10 = useMemo(() => {
+    const top10Names = chartData.map((d) => d.name);
+    const set = new Set(top10Names);
+    const filtered = companionStackData.filter((r) => set.has(r.country));
+    if (sortKeys && sortKeys.length > 0) {
+      return [...filtered].sort((a, b) => {
+        const sumA = sortKeys.reduce((acc, k) => acc + a[k], 0);
+        const sumB = sortKeys.reduce((acc, k) => acc + b[k], 0);
+        return sumB - sumA;
+      });
+    }
+    const indexMap = new Map(top10Names.map((n, i) => [n, i]));
+    return [...filtered].sort((a, b) => (indexMap.get(a.country) ?? 99) - (indexMap.get(b.country) ?? 99));
+  }, [chartData, companionStackData, sortKeys]);
+
+  const top10Stack = useMemo(() => {
+    const compMap = new Map(companionStackData.map((c) => [c.country, c]));
+    return chartData.map((row) => {
+      const comp = compMap.get(row.name);
+      const entry: Record<string, number | string | boolean | Record<string, number>> = {
+        country: row.name,
+        total: row.value,
+      };
+      if (comp) {
+        const pct: Record<string, number> = {};
+        for (const key of COMPANION_KEYS) {
+          entry[key] = Math.round(row.value * (comp[key] / 100));
+          pct[key] = comp[key];
+        }
+        entry.__pct = pct;
+        entry.__raw = comp.__raw;
+      } else {
+        for (const key of COMPANION_KEYS) entry[key] = 0;
+        entry.__missing = true;
+      }
+      return entry;
+    });
+  }, [chartData, companionStackData]);
+
+  const recommendation = useMemo(() => {
+    const compTotals: Record<string, number> = {};
+    for (const key of COMPANION_KEYS) compTotals[key] = 0;
+    let visitorSum = 0;
+    let companionSum = 0;
+
+    for (const row of top10Stack) {
+      if (row.__missing) continue;
+      visitorSum += row.total as number;
+      for (const key of COMPANION_KEYS) {
+        compTotals[key] += row[key] as number;
+        companionSum += row[key] as number;
+      }
+    }
+
+    const roomTotals: Record<RoomType, number> = { 싱글: 0, 더블: 0, 트윈: 0, 패밀리: 0 };
+    for (const key of COMPANION_KEYS) {
+      roomTotals[ROOM_BY_COMPANION[key]] += compTotals[key];
+    }
+    const roomMix = ROOM_ORDER.map((name) => ({
+      name,
+      pct: companionSum > 0 ? Math.round((roomTotals[name] / companionSum) * 100) : 0,
+    }));
+
+    const topCountries = top10Stack
+      .filter((r) => !r.__missing)
+      .slice()
+      .sort((a, b) => (b.total as number) - (a.total as number))
+      .slice(0, 3)
+      .map((r) => ({
+        name: r.country as string,
+        visitors: r.total as number,
+        share: visitorSum > 0 ? Math.round(((r.total as number) / visitorSum) * 1000) / 10 : 0,
+      }));
+
+    return { roomMix, topCountries, visitorSum };
+  }, [top10Stack]);
+
+  const sortChip = useMemo(() => {
+    if (!sortKeys || sortKeys.length === 0) return null;
+    const pickTextColor = (hex: string) => {
+      const h = hex.replace("#", "");
+      const r = parseInt(h.substring(0, 2), 16);
+      const g = parseInt(h.substring(2, 4), 16);
+      const b = parseInt(h.substring(4, 6), 16);
+      const L = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return L > 0.6 ? "#1f2937" : "#ffffff";
+    };
+    let bg: string;
+    let label: string;
+    if (sortKeys.length === 1) {
+      const k = sortKeys[0];
+      label = k;
+      bg = COMPANION_COLORS[k];
+    } else {
+      const roomTypes = new Set(sortKeys.map((k) => ROOM_BY_COMPANION[k]));
+      if (roomTypes.size === 1) {
+        const room = [...roomTypes][0];
+        label = `${room} 그룹`;
+        bg = ROOM_COLORS[room];
+      } else {
+        label = `${sortKeys.length}개 기준`;
+        bg = "#374151";
+      }
+    }
+    return { label, color: bg, textColor: pickTextColor(bg) };
+  }, [sortKeys]);
+
+  const stackOrder = useMemo(() => {
+    if (!sortKeys || sortKeys.length === 0) return COMPANION_KEYS;
+    const set = new Set(sortKeys);
+    const front = COMPANION_KEYS.filter((k) => set.has(k));
+    const back = COMPANION_KEYS.filter((k) => !set.has(k));
+    return [...front, ...back];
+  }, [sortKeys]);
+
+  const cellFill = (key: typeof COMPANION_KEYS[number], country: string) => {
+    const base = COMPANION_COLORS[key];
+    if (sortKeys && !sortKeys.includes(key)) return `${base}33`;
+    if (highlightedCountry && highlightedCountry !== country) return `${base}33`;
+    return base;
+  };
+
+  const handleBarEnter = (payload: { country?: string } | undefined) => {
+    if (payload?.country) setHighlightedCountry(payload.country);
+  };
+  const handleBarLeave = () => setHighlightedCountry(null);
+
+  const handleCompanionBarEnter = (payload: Record<string, unknown> | undefined) => {
+    const country = payload?.country as string | undefined;
+    if (!country) return;
+    setHighlightedCountry(country);
+    const pct: Record<string, number> = {};
+    for (const k of COMPANION_KEYS) {
+      const v = payload?.[k];
+      pct[k] = typeof v === "number" ? v : 0;
+    }
+    setHoverData({
+      country,
+      pct,
+      raw: (payload?.__raw as Record<string, number>) ?? {},
+    });
+  };
+  const handleCompanionBarLeave = () => {
+    setHighlightedCountry(null);
+    setHoverData(null);
+  };
+
+  const toggleSortKey = (key: typeof COMPANION_KEYS[number]) => {
+    setSortKeys((prev) => {
+      if (prev && prev.length === 1 && prev[0] === key) return null;
+      return [key];
+    });
+  };
 
   const showAccommodation = currentViewLevel !== "national" && selectedSubRegion !== null;
   const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
@@ -303,81 +481,265 @@ export function MainPage() {
       </div>
 
       {/* 우측 패널 */}
-      <div className="absolute right-[3%] top-1/2 -translate-y-1/2 w-[50%] h-[85%] flex flex-col gap-6">
-        
+      <div className="absolute right-[3%] top-1/2 -translate-y-1/2 w-[50%] h-[85%] flex flex-col gap-4">
+
         {/* 슬라이더 영역 */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-          <h3 className="text-base font-bold text-gray-800 mb-8">기간 선택 (2023 - 2025)</h3>
-          <div className="relative w-full h-3 bg-gray-200 rounded-full mb-10 mt-2">
-            <div className="absolute h-full bg-blue-500 rounded-full pointer-events-none transition-all duration-75" style={{ left: `${getSliderPercent(sliderValues[0])}%`, width: `${getSliderPercent(sliderValues[1]) - getSliderPercent(sliderValues[0])}%` }} />
-            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-blue-600 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[0])}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(0)} />
-            <div className="absolute top-1/2 w-6 h-6 bg-white border-4 border-red-500 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[1])}% - 12px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(1)} />
-            <div className="absolute left-0 top-6 text-xs font-semibold text-gray-400">2023</div>
-            <div className="absolute left-1/2 top-6 text-xs font-semibold text-gray-400 -translate-x-1/2">2024</div>
-            <div className="absolute right-0 top-6 text-xs font-semibold text-gray-400">2025</div>
+        <div className="bg-white rounded-xl shadow-lg p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-gray-800">기간 선택 (2023 - 2025)</h3>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded border border-blue-100">{startMonthLabel}</span>
+              <span className="text-gray-400">→</span>
+              <span className="bg-red-50 text-red-700 font-semibold px-2 py-0.5 rounded border border-red-100">{endMonthLabel}</span>
+            </div>
           </div>
-          <div className="flex justify-between gap-4 mt-2">
-            <div className="flex-1 bg-blue-50 p-3 rounded-lg border border-blue-100">
-              <div className="text-xs text-blue-600 font-bold mb-1">시작일</div>
-              <div className="text-sm font-semibold text-blue-900">{startMonthLabel}</div>
-            </div>
-            <div className="flex-1 bg-red-50 p-3 rounded-lg border border-red-100">
-              <div className="text-xs text-red-600 font-bold mb-1">종료일</div>
-              <div className="text-sm font-semibold text-red-900">{endMonthLabel}</div>
-            </div>
+          <div className="relative w-full h-2.5 bg-gray-200 rounded-full mb-6">
+            <div className="absolute h-full bg-blue-500 rounded-full pointer-events-none transition-all duration-75" style={{ left: `${getSliderPercent(sliderValues[0])}%`, width: `${getSliderPercent(sliderValues[1]) - getSliderPercent(sliderValues[0])}%` }} />
+            <div className="absolute top-1/2 w-5 h-5 bg-white border-[3px] border-blue-600 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[0])}% - 10px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(0)} />
+            <div className="absolute top-1/2 w-5 h-5 bg-white border-[3px] border-red-500 rounded-full shadow cursor-grab active:cursor-grabbing z-10 touch-none" style={{ left: `calc(${getSliderPercent(sliderValues[1])}% - 10px)`, transform: 'translateY(-50%)' }} onPointerDown={handlePointerDown(1)} />
+            <div className="absolute left-0 top-4 text-[10px] font-semibold text-gray-400">2023</div>
+            <div className="absolute left-1/2 top-4 text-[10px] font-semibold text-gray-400 -translate-x-1/2">2024</div>
+            <div className="absolute right-0 top-4 text-[10px] font-semibold text-gray-400">2025</div>
           </div>
         </div>
 
         {/* 듀얼 차트 영역 */}
-        <div className="flex-1 flex gap-4 min-h-[350px]">
+        <div className="flex-1 flex gap-4 min-h-0 relative">
           
-          {/* 차트 1: Top 10 방문 국가 */}
+          {/* 차트 1: Top 10 방문 국가 (방문자 수) */}
           <div className="flex-1 bg-white rounded-xl shadow-lg p-5 border border-gray-200 flex flex-col">
             <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between">
               <span>Top 10 방문 국가</span>
-              {/* 선택된 상세구역 이름이 있으면 표시, 없으면 기본 광역지역 표시 */}
               <span className="text-[10px] font-normal text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                {selectedSubRegionName 
-                  ? selectedSubRegionName 
+                {selectedSubRegionName
+                  ? selectedSubRegionName
                   : (regionsInfo.find(r => r.id === activeDisplayRegion)?.name || '상세 구역')} 기준
               </span>
             </h3>
-            <div className="flex-1 w-full">
+            <div className="flex-1 w-full min-h-0">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical" margin={{ left: -10, right: 10 }}>
+                <BarChart data={chartData} layout="vertical" margin={{ top: 4, left: -4, right: 8, bottom: 4 }} barCategoryGap={3}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" style={{ fontSize: "11px" }} />
-                  <YAxis type="category" dataKey="name" width={60} style={{ fontSize: "11px", fontWeight: "bold" }} />
-                  <Tooltip cursor={{fill: 'rgba(0,0,0,0.05)'}} contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '12px' }} />
-                  <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} animationDuration={300} />
+                  <XAxis type="number" tickFormatter={(v) => v.toLocaleString()} style={{ fontSize: "10px" }} />
+                  <YAxis type="category" dataKey="name" width={60} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                    contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '11px' }}
+                    formatter={(value: number) => [`${value.toLocaleString()}명`, '방문자']}
+                  />
+                  <Bar
+                    dataKey="value"
+                    radius={[0, 4, 4, 0]}
+                    animationDuration={300}
+                    onMouseEnter={(d: { name?: string }) => d?.name && setHighlightedCountry(d.name)}
+                    onMouseLeave={handleBarLeave}
+                  >
+                    {chartData.map((entry) => (
+                      <Cell
+                        key={entry.name}
+                        fill={highlightedCountry && highlightedCountry !== entry.name ? "#47556933" : "#475569"}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* 차트 2: 동반자 유형 OR 숙박업소 현황 */}
+          {/* 차트 2: Top 10 국적별 동반자 유형 (스택바) OR 숙박업소 현황 */}
           <div className="flex-1 bg-white rounded-xl shadow-lg p-5 border border-gray-200 flex flex-col">
-            <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between">
-              <span>{showAccommodation ? "숙박업소 현황" : "동반자 유형"}</span>
-              {showAccommodation && selectedSubRegionName && (
-                <span className="text-[10px] font-normal text-orange-600 bg-orange-50 px-2 py-1 rounded">
-                  {selectedSubRegionName} 기준
-                </span>
-              )}
+            <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
+              <span>{showAccommodation ? "숙박업소 현황" : "Top 10 국적별 동반자 유형"}</span>
+              <div className="flex items-center gap-1.5">
+                {!showAccommodation && (
+                  sortChip ? (
+                    <button
+                      onClick={() => setSortKeys(null)}
+                      className="text-[10px] font-bold hover:opacity-90 px-2 py-1 rounded flex items-center gap-1"
+                      style={{ background: sortChip.color, color: sortChip.textColor }}
+                      title="정렬 해제"
+                    >
+                      {sortChip.label} ↓ ✕
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-medium text-gray-400 italic">
+                      바/범례 클릭 → 정렬
+                    </span>
+                  )
+                )}
+                {showAccommodation && selectedSubRegionName ? (
+                  <span className="text-[10px] font-normal text-orange-600 bg-orange-50 px-2 py-1 rounded">
+                    {selectedSubRegionName} 기준
+                  </span>
+                ) : !showAccommodation ? (
+                  <span className="text-[10px] font-normal text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                    {companionYear}년 기준
+                  </span>
+                ) : null}
+              </div>
             </h3>
-            <div className="flex-1 w-full">
+            <div className="flex-1 w-full min-h-0">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={showAccommodation ? accommodationData : companionData} layout="vertical" margin={{ left: -10, right: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" style={{ fontSize: "11px" }} />
-                  <YAxis type="category" dataKey="name" width={60} style={{ fontSize: "11px", fontWeight: "bold" }} />
-                  <Tooltip cursor={{fill: 'rgba(0,0,0,0.05)'}} contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '12px' }} />
-                  <Bar dataKey="value" fill={showAccommodation ? "#f59e0b" : "#10b981"} radius={[0, 4, 4, 0]} animationDuration={300} />
-                </BarChart>
+                {showAccommodation ? (
+                  <BarChart data={accommodationData} layout="vertical" margin={{ left: -10, right: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" style={{ fontSize: "11px" }} />
+                    <YAxis type="category" dataKey="name" width={60} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                    <Tooltip cursor={{fill: 'rgba(0,0,0,0.05)'}} contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '12px' }} />
+                    <Bar dataKey="value" fill="#f59e0b" radius={[0, 4, 4, 0]} animationDuration={300} />
+                  </BarChart>
+                ) : (
+                  <BarChart data={companionTop10} layout="vertical" margin={{ top: 4, left: -4, right: 8, bottom: 4 }} barCategoryGap={3}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v) => `${v}%`} style={{ fontSize: "10px" }} />
+                    <YAxis type="category" dataKey="country" width={60} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                    <Tooltip
+                      cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                      content={() => null}
+                    />
+                    <Legend
+                      wrapperStyle={{ fontSize: "10px", paddingTop: 4, cursor: "pointer" }}
+                      iconSize={8}
+                      onClick={(payload: { dataKey?: string }) => {
+                        const key = payload?.dataKey as typeof COMPANION_KEYS[number] | undefined;
+                        if (key) toggleSortKey(key);
+                      }}
+                      formatter={(value: string) => (
+                        <span style={{ color: COMPANION_COLORS[value as typeof COMPANION_KEYS[number]] || "#374151", fontWeight: 600 }}>
+                          {value}
+                        </span>
+                      )}
+                    />
+                    {stackOrder.map((key) => (
+                      <Bar
+                        key={key}
+                        dataKey={key}
+                        stackId="companion"
+                        cursor="pointer"
+                        onMouseEnter={handleCompanionBarEnter}
+                        onMouseLeave={handleCompanionBarLeave}
+                        onClick={() => toggleSortKey(key)}
+                      >
+                        {companionTop10.map((entry) => (
+                          <Cell key={entry.country} fill={cellFill(key, entry.country)} />
+                        ))}
+                      </Bar>
+                    ))}
+                  </BarChart>
+                )}
               </ResponsiveContainer>
             </div>
           </div>
 
+          {/* 커스텀 호버 패널 — Top 10 영역 위에 겹쳐 표시 */}
+          {hoverData && !showAccommodation && (
+            <div className="absolute left-3 top-3 z-50 bg-white shadow-2xl rounded-lg p-3 border border-gray-200 pointer-events-none min-w-[220px] backdrop-blur-sm">
+              <div className="text-sm font-bold text-gray-800 mb-2 pb-1.5 border-b border-gray-100">
+                {hoverData.country}
+              </div>
+              <div className="space-y-1">
+                {COMPANION_KEYS.map((key) => {
+                  const pct = hoverData.pct[key] ?? 0;
+                  const raw = hoverData.raw[key];
+                  return (
+                    <div key={key} className="flex items-center gap-2 text-[11px]">
+                      <span
+                        className="w-2 h-2 rounded-sm shrink-0"
+                        style={{ background: COMPANION_COLORS[key] }}
+                      />
+                      <span className="flex-1 text-gray-700">{key}</span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                        {pct.toFixed(1)}%
+                      </span>
+                      {raw != null && (
+                        <span className="font-mono text-[10px] text-gray-400 tabular-nums">
+                          ({raw}%)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[9px] text-gray-400 mt-1.5 pt-1.5 border-t border-gray-100">
+                좌: 구성비 · 우: 응답률
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* 추천 숙박 구성 카드 */}
+        <div className="bg-white rounded-xl shadow-lg p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-bold text-gray-800">추천 숙박 구성</h3>
+            <span className="text-[10px] font-normal text-purple-700 bg-purple-50 px-2 py-0.5 rounded">
+              {selectedSubRegionName
+                ? `${selectedSubRegionName} · ${companionYear}`
+                : `${regionsInfo.find((r) => r.id === activeDisplayRegion)?.name || '전국'} · ${companionYear}`}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wide mb-1">
+                Top 3 외국인 국적
+              </div>
+              <ul className="space-y-1">
+                {recommendation.topCountries.map((c, i) => (
+                  <li key={c.name} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold flex items-center justify-center">
+                        {i + 1}
+                      </span>
+                      <span className="font-semibold text-gray-800">{c.name}</span>
+                    </span>
+                    <span className="text-gray-500">
+                      {c.share}% <span className="text-[10px]">({c.visitors.toLocaleString()}명)</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wide mb-1 flex items-center justify-between">
+                <span>추천 방 구성</span>
+                <span className="text-[9px] font-normal text-gray-400 normal-case tracking-normal">클릭하면 정렬</span>
+              </div>
+              <ul className="space-y-1">
+                {recommendation.roomMix.map((r) => {
+                  const keys = (Object.keys(ROOM_BY_COMPANION) as (typeof COMPANION_KEYS[number])[])
+                    .filter((k) => ROOM_BY_COMPANION[k] === r.name);
+                  const isActive = sortKeys != null
+                    && sortKeys.length === keys.length
+                    && keys.every((k) => sortKeys.includes(k));
+                  return (
+                    <li
+                      key={r.name}
+                      onClick={() => setSortKeys((prev) => {
+                        if (prev && prev.length === keys.length && keys.every((k) => prev.includes(k))) return null;
+                        return keys;
+                      })}
+                      className={`flex items-center gap-2 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors ${isActive ? "bg-gray-100" : "hover:bg-gray-50"}`}
+                      role="button"
+                      aria-pressed={isActive}
+                    >
+                      <span
+                        className="inline-block w-2 h-2 rounded-sm"
+                        style={{ background: ROOM_COLORS[r.name] }}
+                      />
+                      <span className={`font-semibold w-10 ${isActive ? "text-gray-900" : "text-gray-800"}`}>{r.name}</span>
+                      <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${r.pct}%`, background: ROOM_COLORS[r.name] }}
+                        />
+                      </div>
+                      <span className="text-gray-600 w-8 text-right">{r.pct}%</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     </div>
