@@ -5,23 +5,23 @@ import {
   formatVisitorsInMan,
   getHeatmapColor,
 } from "../data/heatmapPalette";
-import SeoulSvg from "../../imports/simple/11.svg?raw";
-import BusanSvg from "../../imports/simple/26.svg?raw";
-import GyeonggiSvg from "../../imports/simple/41.svg?raw";
-import GangwonSvg from "../../imports/simple/31.svg?raw";
-import GyeongnamSvg from "../../imports/simple/51.svg?raw";
-import GyeongbukSvg from "../../imports/simple/52.svg?raw";
-import GwangjuSvg from "../../imports/simple/61.svg?raw";
-import DaeguSvg from "../../imports/simple/71.svg?raw";
-import DaejeonSvg from "../../imports/simple/72.svg?raw";
-import SejongSvg from "../../imports/simple/81.svg?raw";
-import UlsanSvg from "../../imports/simple/73.svg?raw";
-import IncheonSvg from "../../imports/simple/33.svg?raw";
-import JeonnamSvg from "../../imports/simple/62.svg?raw";
-import JeonbukSvg from "../../imports/simple/63.svg?raw";
-import JejuSvg from "../../imports/simple/99.svg?raw";
-import ChungnamSvg from "../../imports/simple/88.svg?raw";
-import ChungbukSvg from "../../imports/simple/87.svg?raw";
+import SeoulSvg from "../../imports/simple/sl.svg?raw";
+import BusanSvg from "../../imports/simple/bs.svg?raw";
+import GyeonggiSvg from "../../imports/simple/gg.svg?raw";
+import GangwonSvg from "../../imports/simple/gw.svg?raw";
+import GyeongnamSvg from "../../imports/simple/gn.svg?raw";
+import GyeongbukSvg from "../../imports/simple/gb.svg?raw";
+import GwangjuSvg from "../../imports/simple/gj.svg?raw";
+import DaeguSvg from "../../imports/simple/dg.svg?raw";
+import DaejeonSvg from "../../imports/simple/dj.svg?raw";
+import SejongSvg from "../../imports/simple/sj.svg?raw";
+import UlsanSvg from "../../imports/simple/us.svg?raw";
+import IncheonSvg from "../../imports/simple/ic.svg?raw";
+import JeonnamSvg from "../../imports/simple/jn.svg?raw";
+import JeonbukSvg from "../../imports/simple/jb.svg?raw";
+import JejuSvg from "../../imports/simple/jj.svg?raw";
+import ChungnamSvg from "../../imports/simple/cn.svg?raw";
+import ChungbukSvg from "../../imports/simple/cb.svg?raw";
 
 const regionSvgMap: Record<string, string> = {
   seoul: SeoulSvg, busan: BusanSvg, gyeonggi: GyeonggiSvg, incheon: IncheonSvg,
