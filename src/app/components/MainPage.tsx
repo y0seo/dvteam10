@@ -15,6 +15,7 @@ import {
   getCompanionByCountry,
   pickCompanionYear,
 } from "../data/companionData";
+import { getCountryPercentagesByRegion } from "../data/nationality";
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -28,28 +29,6 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-const generateRegionVisitorData = (startDate: string, endDate: string) => {
-  const seed = new Date(startDate).getTime() * 0.0001 + new Date(endDate).getTime() * 0.0001;
-  const data: { [key: string]: number } = {};
-  regionsInfo.forEach((region, i) => {
-    data[region.id] = Math.floor((Math.sin(seed + i * 2.5) + 1) * 30000) + 5000;
-  });
-  return data;
-};
-
-const generateCountryData = (targetId: string, startDate: string, endDate: string) => {
-  const countries = ["중국", "일본", "미국", "태국", "베트남", "필리핀", "대만", "홍콩", "싱가포르", "러시아"];
-  let idSeed = 0;
-  for (let i = 0; i < targetId.length; i++) idSeed += targetId.charCodeAt(i);
-  const dateSeed = new Date(startDate).getTime() * 0.00005 + new Date(endDate).getTime() * 0.00005;
-  const finalSeed = idSeed + dateSeed;
-  return countries
-    .map((country, i) => ({
-      name: country,
-      value: Math.floor((Math.sin(finalSeed + i * 1.5) + 1) * 8000) + 1000,
-    }))
-    .sort((a, b) => b.value - a.value);
-};
 
 const generateAccommodationData = (targetId: string, startDate: string, endDate: string) => {
   const types = ["관광호텔", "일반호텔", "여관업", "민박", "기타"];
@@ -158,10 +137,32 @@ export function MainPage() {
   const activeDisplayRegion = currentViewLevel === "national"
     ? (hoveredRegion || selectedRegion || "seoul")
     : (selectedSubRegion || currentViewLevel);
+  
+   
+  const chartData = useMemo(() => {
+    const baseRegionId =
+      currentViewLevel === "national"
+        ? activeDisplayRegion
+        : currentViewLevel;
 
-  const chartData = useMemo(() => generateCountryData(activeDisplayRegion, startDate, endDate), [activeDisplayRegion, startDate, endDate]);
+    const rawPercentages = getCountryPercentagesByRegion(
+      activeDisplayRegion,
+      baseRegionId,
+      selectedSubRegionName
+    );
+
+    const totalVisitors = selectedSubRegion 
+      ? (subRegionVisitorData[selectedSubRegion] || 0) 
+      : (visitorData[activeDisplayRegion] || 0);
+
+    return rawPercentages.map(item => ({
+    name: item.name,
+    percentage: item.percentage, // 툴팁에 띄우기 위해 저장
+    value: Math.floor((item.percentage / 100) * totalVisitors) || 0, // 실제 방문객 수 (차트 바 길이)
+  }));
+}, [activeDisplayRegion, currentViewLevel, selectedSubRegion, selectedSubRegionName, visitorData, subRegionVisitorData]);
+
   const accommodationData = useMemo(() => generateAccommodationData(selectedSubRegion || currentViewLevel, startDate, endDate), [selectedSubRegion, currentViewLevel, startDate, endDate]);
-
   const companionYear = useMemo(() => pickCompanionYear(endMonth), [endMonth]);
   const companionStackData = useMemo(() => getCompanionByCountry(companionYear), [companionYear]);
 
@@ -521,11 +522,14 @@ export function MainPage() {
                 <BarChart data={chartData} layout="vertical" margin={{ top: 4, left: -4, right: 8, bottom: 4 }} barCategoryGap={3}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                   <XAxis type="number" tickFormatter={(v) => v.toLocaleString()} style={{ fontSize: "10px" }} />
-                  <YAxis type="category" dataKey="name" width={60} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                  <YAxis type="category" dataKey="name" width={90} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
                   <Tooltip
                     cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                     contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '11px' }}
-                    formatter={(value: number) => [`${value.toLocaleString()}명`, '방문자']}
+                    formatter={(value: number, name: string, props: any) => {
+                      const percentage = props.payload?.percentage || 0;
+                      return [`${value.toLocaleString()}명 (${percentage}%)`, '방문객 수'];
+                    }}
                   />
                   <Bar
                     dataKey="value"
@@ -584,7 +588,7 @@ export function MainPage() {
                   <BarChart data={accommodationData} layout="vertical" margin={{ left: -10, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" style={{ fontSize: "11px" }} />
-                    <YAxis type="category" dataKey="name" width={60} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                    <YAxis type="category" dataKey="name" width={65} style={{ fontSize: "11px", fontWeight: "bold" }} />
                     <Tooltip cursor={{fill: 'rgba(0,0,0,0.05)'}} contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '12px' }} />
                     <Bar dataKey="value" fill="#f59e0b" radius={[0, 4, 4, 0]} animationDuration={300} />
                   </BarChart>
@@ -592,7 +596,7 @@ export function MainPage() {
                   <BarChart data={companionTop10} layout="vertical" margin={{ top: 4, left: -4, right: 8, bottom: 4 }} barCategoryGap={3}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v) => `${v}%`} style={{ fontSize: "10px" }} />
-                    <YAxis type="category" dataKey="country" width={60} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
+                    <YAxis type="category" dataKey="country" width={67} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
                     <Tooltip
                       cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                       content={() => null}
