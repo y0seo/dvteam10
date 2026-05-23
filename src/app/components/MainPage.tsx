@@ -4,6 +4,7 @@ import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveCo
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
+import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
 import {
   getDistrictVisitorTotals,
   getProvinceVisitorScaleMax,
@@ -380,8 +381,9 @@ export function MainPage() {
   };
 
   return (
-    <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
+    <div className="relative w-full h-screen bg-gray-100 flex p-6 overflow-hidden select-none font-sans antialiased gap-4">
       
+      {/* 고정 플로팅 버튼: 캘린더 */}
       <button
         onClick={() => navigate("/calendar")}
         className="fixed left-8 bottom-8 w-16 h-16 bg-white rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 border-gray-200 hover:border-blue-500 z-50"
@@ -389,7 +391,8 @@ export function MainPage() {
       >
         <Calendar className="w-8 h-8 text-blue-600" />
       </button>
-
+      
+      {/* 고정 플로팅 버튼: 비교(VS) */}
       <div className="fixed right-8 bottom-8 z-50">
         <button
           onClick={goToComparePage}
@@ -404,85 +407,96 @@ export function MainPage() {
         </button>
       </div>
 
-      {/* 지도 영역 */}
-      <div className="absolute left-[3%] top-1/2 -translate-y-1/2 w-[40%] h-[85%] bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-        <div className="absolute right-5 top-5 z-40 flex flex-col items-end gap-3">
-          <button
-            onClick={() => setIsCompareMode((prev) => !prev)}
-            className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
-              isCompareMode
-                ? "bg-emerald-500 border-emerald-400"
-                : "bg-white border-gray-200 hover:border-emerald-500"
-            }`}
-            aria-label="비교 장바구니"
-            title="비교 장바구니"
-          >
-            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-emerald-600"}`} />
-            {compareRegions.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
-                {compareRegions.length}
-              </span>
-            )}
-          </button>
-
-          {isCompareMode && (
-            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-emerald-100 p-3">
-              <div className="flex justify-end mb-2">
-                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  {compareRegions.length}/3
+      {/*좌측 거대 상자: 가로 비율 42% 차지, 지도(위) + 산점도(아래) 세로 정렬 */}
+      <div className="w-[42%] h-full flex flex-col gap-4 min-h-0">
+        <div className="w-full h-[74%] bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden relative">
+          <div className="absolute right-5 top-5 z-40 flex flex-col items-end gap-3">
+            <button
+              onClick={() => setIsCompareMode((prev) => !prev)}
+              className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+                isCompareMode
+                  ? "bg-emerald-500 border-emerald-400"
+                  : "bg-white border-gray-200 hover:border-emerald-500"
+              }`}
+              aria-label="비교 장바구니"
+              title="비교 장바구니"
+            >
+              <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-emerald-600"}`} />
+              {compareRegions.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
+                  {compareRegions.length}
                 </span>
-              </div>
-              <div className="space-y-1.5">
-                {compareRegions.length === 0 ? (
-                  <p className="text-[11px] text-gray-500 leading-4">지도에서 선택</p>
-                ) : (
-                  compareRegions.map((region) => (
-                    <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
-                        <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+              )}
+            </button>
+
+            {isCompareMode && (
+              <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-emerald-100 p-3">
+                <div className="flex justify-end mb-2">
+                  <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    {compareRegions.length}/3
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {compareRegions.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 leading-4">지도에서 선택</p>
+                  ) : (
+                    compareRegions.map((region) => (
+                      <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
+                          <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+
+          {currentViewLevel === "national" ? (
+            <KoreaMap
+              onRegionClick={(id) => {
+                setSelectedRegion(id);
+                setSelectedSubRegion(null);
+                setSelectedSubRegionName(null);
+                setCurrentViewLevel(id);
+              }}
+              onRegionHover={setHoveredRegion}
+              selectedRegion={selectedRegion}
+              visitorData={visitorData}
+              colorScaleMax={provinceVisitorScaleMax}
+            />
+          ) : (
+            <DetailRegionMap 
+              regionId={currentViewLevel}
+              onBack={() => {
+                setCurrentViewLevel("national");
+                setSelectedSubRegion(null);
+                setSelectedSubRegionName(null);
+              }}
+              visitorData={subRegionVisitorData}
+              colorScaleMax={subRegionVisitorScaleMax}
+              onSubRegionClick={handleSubRegionSelect}
+              selectedSubRegion={selectedSubRegion}
+              selectedCompareSubRegions={compareRegionIds}
+            />
           )}
         </div>
 
-        {currentViewLevel === "national" ? (
-          <KoreaMap
-            onRegionClick={(id) => {
-              setSelectedRegion(id);
-              setSelectedSubRegion(null);
-              setSelectedSubRegionName(null); // 초기화
-              setCurrentViewLevel(id);
-            }}
-            onRegionHover={setHoveredRegion}
-            selectedRegion={selectedRegion}
-            visitorData={visitorData}
-            colorScaleMax={provinceVisitorScaleMax}
-          />
-        ) : (
-          <DetailRegionMap 
-            regionId={currentViewLevel}
-            onBack={() => {
-              setCurrentViewLevel("national");
-              setSelectedSubRegion(null);
-              setSelectedSubRegionName(null); // 초기화
-            }}
-            visitorData={subRegionVisitorData}
-            colorScaleMax={subRegionVisitorScaleMax}
-            onSubRegionClick={handleSubRegionSelect}
-            selectedSubRegion={selectedSubRegion}
-            selectedCompareSubRegions={compareRegionIds}
-          />
-        )}
-      </div>
+        {/* ② 좌측 하단: 산점도 영역 (남은 높이 46% 영역 안에서 유연하게 들어앉음) */}
+        <InfrastructureScatterPlot 
+          currentViewLevel={currentViewLevel}
+          selectedRegion={selectedRegion}
+          selectedSubRegion={selectedSubRegion}
+          regionsInfo={regionsInfo}
+        />
+        
+      </div> {/* 좌측 영역 묶음 상자 끝 */}
 
-      {/* 우측 패널 */}
-      <div className="absolute right-[3%] top-1/2 -translate-y-1/2 w-[50%] h-[85%] flex flex-col gap-4">
+      {/* 🟢 [구조 정돈] 우측 거대 상자: absolute 좌표계를 지우고 flex-1을 주어 우측 영역 전체를 다 쓰도록 정돈 */}
+      <div className="flex-1 h-full flex flex-col gap-4 min-h-0">
 
         {/* 슬라이더 영역 */}
         <div className="bg-white rounded-xl shadow-lg p-3 border border-gray-200">
@@ -507,7 +521,7 @@ export function MainPage() {
         {/* 듀얼 차트 영역 */}
         <div className="flex-1 flex gap-4 min-h-0 relative">
           
-          {/* 차트 1: Top 10 방문 국가 (방문자 수) */}
+          {/* 차트 1: Top 10 방문 국가 */}
           <div className="flex-1 bg-white rounded-xl shadow-lg p-5 border border-gray-200 flex flex-col">
             <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between">
               <span>Top 10 방문 국가</span>
@@ -550,7 +564,7 @@ export function MainPage() {
             </div>
           </div>
 
-          {/* 차트 2: Top 10 국적별 동반자 유형 (스택바) OR 숙박업소 현황 */}
+          {/* 차트 2: 국적별 동반자 유형 / 숙박업소 현황 */}
           <div className="flex-1 bg-white rounded-xl shadow-lg p-5 border border-gray-200 flex flex-col">
             <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
               <span>{showAccommodation ? "숙박업소 현황" : "Top 10 국적별 동반자 유형"}</span>
@@ -597,10 +611,7 @@ export function MainPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v) => `${v}%`} style={{ fontSize: "10px" }} />
                     <YAxis type="category" dataKey="country" width={67} interval={0} style={{ fontSize: "11px", fontWeight: "bold" }} />
-                    <Tooltip
-                      cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                      content={() => null}
-                    />
+                    <Tooltip cursor={{ fill: 'rgba(0,0,0,0.05)' }} content={() => null} />
                     <Legend
                       wrapperStyle={{ fontSize: "10px", paddingTop: 4, cursor: "pointer" }}
                       iconSize={8}
@@ -635,7 +646,7 @@ export function MainPage() {
             </div>
           </div>
 
-          {/* 커스텀 호버 패널 — Top 10 영역 위에 겹쳐 표시 */}
+          {/* 커스텀 호버 패널 */}
           {hoverData && !showAccommodation && (
             <div className="absolute left-3 top-3 z-50 bg-white shadow-2xl rounded-lg p-3 border border-gray-200 pointer-events-none min-w-[220px] backdrop-blur-sm">
               <div className="text-sm font-bold text-gray-800 mb-2 pb-1.5 border-b border-gray-100">
@@ -647,18 +658,11 @@ export function MainPage() {
                   const raw = hoverData.raw[key];
                   return (
                     <div key={key} className="flex items-center gap-2 text-[11px]">
-                      <span
-                        className="w-2 h-2 rounded-sm shrink-0"
-                        style={{ background: COMPANION_COLORS[key] }}
-                      />
+                      <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: COMPANION_COLORS[key] }} />
                       <span className="flex-1 text-gray-700">{key}</span>
-                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
-                        {pct.toFixed(1)}%
-                      </span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">{pct.toFixed(1)}%</span>
                       {raw != null && (
-                        <span className="font-mono text-[10px] text-gray-400 tabular-nums">
-                          ({raw}%)
-                        </span>
+                        <span className="font-mono text-[10px] text-gray-400 tabular-nums">({raw}%)</span>
                       )}
                     </div>
                   );
@@ -669,7 +673,6 @@ export function MainPage() {
               </div>
             </div>
           )}
-
         </div>
 
         {/* 추천 숙박 구성 카드 */}
@@ -684,21 +687,15 @@ export function MainPage() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wide mb-1">
-                Top 3 외국인 국적
-              </div>
+              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wide mb-1">Top 3 외국인 국적</div>
               <ul className="space-y-1">
                 {recommendation.topCountries.map((c, i) => (
                   <li key={c.name} className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold flex items-center justify-center">
-                        {i + 1}
-                      </span>
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold flex items-center justify-center">{i + 1}</span>
                       <span className="font-semibold text-gray-800">{c.name}</span>
                     </span>
-                    <span className="text-gray-500">
-                      {c.share}% <span className="text-[10px]">({c.visitors.toLocaleString()}명)</span>
-                    </span>
+                    <span className="text-gray-500">{c.share}% <span className="text-[10px]">({c.visitors.toLocaleString()}명)</span></span>
                   </li>
                 ))}
               </ul>
@@ -710,11 +707,8 @@ export function MainPage() {
               </div>
               <ul className="space-y-1">
                 {recommendation.roomMix.map((r) => {
-                  const keys = (Object.keys(ROOM_BY_COMPANION) as (typeof COMPANION_KEYS[number])[])
-                    .filter((k) => ROOM_BY_COMPANION[k] === r.name);
-                  const isActive = sortKeys != null
-                    && sortKeys.length === keys.length
-                    && keys.every((k) => sortKeys.includes(k));
+                  const keys = (Object.keys(ROOM_BY_COMPANION) as (typeof COMPANION_KEYS[number])[]).filter((k) => ROOM_BY_COMPANION[k] === r.name);
+                  const isActive = sortKeys != null && sortKeys.length === keys.length && keys.every((k) => sortKeys.includes(k));
                   return (
                     <li
                       key={r.name}
@@ -726,16 +720,10 @@ export function MainPage() {
                       role="button"
                       aria-pressed={isActive}
                     >
-                      <span
-                        className="inline-block w-2 h-2 rounded-sm"
-                        style={{ background: ROOM_COLORS[r.name] }}
-                      />
+                      <span className="inline-block w-2 h-2 rounded-sm" style={{ background: ROOM_COLORS[r.name] }} />
                       <span className={`font-semibold w-10 ${isActive ? "text-gray-900" : "text-gray-800"}`}>{r.name}</span>
                       <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${r.pct}%`, background: ROOM_COLORS[r.name] }}
-                        />
+                        <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: ROOM_COLORS[r.name] }} />
                       </div>
                       <span className="text-gray-600 w-8 text-right">{r.pct}%</span>
                     </li>
@@ -745,7 +733,9 @@ export function MainPage() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+
+      </div> {/* 우측 영역 묶음 상자 끝 */}
+
+    </div> // MainPage 전체 div 끝
   );
 }
