@@ -1,6 +1,6 @@
 import visitorsCsvRaw from "../../data/visitors_2023_2025.csv?raw";
 
-interface VisitorRow {
+export interface VisitorRow {
   month: string;
   provinceName: string;
   districtName: string;
@@ -86,6 +86,65 @@ export function getDistrictVisitorTotals(regionId: string, startMonth: string, e
   }
 
   return totals;
+}
+
+export function getRegionVisitorTotal(
+  provinceId: string,
+  districtName: string | null,
+  startMonth = "2023-01",
+  endMonth = "2025-12",
+) {
+  const provinceName = provinceIdToCsvName[provinceId];
+  if (!provinceName) return 0;
+
+  if (districtName) {
+    return visitorRows.reduce((sum, row) => {
+      if (row.provinceName !== provinceName || row.districtName !== districtName) return sum;
+      if (!isInMonthRange(row.month, startMonth, endMonth)) return sum;
+      return sum + row.districtVisitors;
+    }, 0);
+  }
+
+  const seenMonths = new Set<string>();
+  return visitorRows.reduce((sum, row) => {
+    if (row.provinceName !== provinceName) return sum;
+    if (!isInMonthRange(row.month, startMonth, endMonth)) return sum;
+    if (seenMonths.has(row.month)) return sum;
+    seenMonths.add(row.month);
+    return sum + row.provinceVisitors;
+  }, 0);
+}
+
+export function getRegionMonthlyVisitorTrend(
+  provinceId: string,
+  districtName: string | null,
+  startMonth = "2023-01",
+  endMonth = "2025-12",
+) {
+  const provinceName = provinceIdToCsvName[provinceId];
+  if (!provinceName) return [];
+
+  const totals: Record<string, number> = {};
+  const seenProvinceMonths = new Set<string>();
+
+  for (const row of visitorRows) {
+    if (row.provinceName !== provinceName) continue;
+    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
+
+    if (districtName) {
+      if (row.districtName !== districtName) continue;
+      totals[row.month] = (totals[row.month] || 0) + row.districtVisitors;
+    } else {
+      const key = `${row.month}|${row.provinceName}`;
+      if (seenProvinceMonths.has(key)) continue;
+      seenProvinceMonths.add(key);
+      totals[row.month] = (totals[row.month] || 0) + row.provinceVisitors;
+    }
+  }
+
+  return Object.entries(totals)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, visitors]) => ({ month, visitors }));
 }
 
 export function getProvinceVisitorScaleMax() {
