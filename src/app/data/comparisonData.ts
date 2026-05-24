@@ -92,9 +92,12 @@ const landPriceRows = parseCsv(realEstateCsvRaw).map((cols) => ({
 
 const lodgingSpendingRows = parseCsv(lodgingSpendingCsvRaw).map((cols) => ({
   year: cols[0],
-  province: cols[1],
-  district: cols[2],
-  spending: parseNumber(cols[4]),
+  regionLevel: cols[1],
+  province: cols[2],
+  district: cols[3],
+  target: cols[6],
+  category: cols[7],
+  spending: parseNumber(cols[8]),
 }));
 
 function getProvinceMetric<T extends { province: string; district: string }>(
@@ -144,8 +147,12 @@ function getAccommodationSpending(provinceId: string, districtName: string | nul
   const match = lodgingSpendingRows.find(
     (row) =>
       row.year === "2025" &&
+      row.target === "외국인" &&
+      row.category === "숙박업" &&
       row.province === provinceName &&
-      (districtName ? row.district === districtName : row.district === ""),
+      (districtName
+        ? row.regionLevel === "시군구" && row.district === districtName
+        : row.regionLevel === "광역시도" && row.district === ""),
   );
 
   return match?.spending ?? null;
