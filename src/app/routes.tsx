@@ -11,18 +11,6 @@ export const router = createBrowserRouter([
     Component: MainPage,
   },
   {
-    path: "/calendar",
-    Component: YearCalendarPage,
-  },
-  {
-    path: "/calendar/:year/:month",
-    Component: MonthCalendarPage,
-  },
-  {
-    path: "/calendar/:year/:month/details",
-    Component: DateDetailPage,
-  },
-  {
     path: "/compare",
     Component: ComparePage,
   },

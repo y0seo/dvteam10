@@ -304,15 +304,6 @@ export function MainPage() {
 
   return (
     <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
-      
-      <button
-        onClick={() => navigate("/calendar")}
-        className="fixed left-8 bottom-8 w-16 h-16 bg-white rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 border-gray-200 hover:border-blue-500 z-50"
-        aria-label="캘린더로 이동"
-      >
-        <Calendar className="w-8 h-8 text-blue-600" />
-      </button>
-
       <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
         <button
           onClick={goToComparePage}

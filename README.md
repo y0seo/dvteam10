@@ -1,5 +1,5 @@
 
-  # Visualizing Inbound Torism Trends in South Korea
+  # InnSight
 
   This is a code bundle for Visualizing Inbound Torism Trends in South Korea. 
 
