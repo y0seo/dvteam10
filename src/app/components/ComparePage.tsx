@@ -1,5 +1,5 @@
-import { useMemo, useState, type ComponentType } from "react";
-import { ArrowLeft, CircleDollarSign, Hotel, MapPinned, UsersRound } from "lucide-react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { CircleDollarSign, Hotel, MapPinned, UsersRound } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import {
   CartesianGrid,
@@ -28,6 +28,12 @@ import {
 
 const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
 
+type ComparePageProps = {
+  regionsOverride?: CompareRegion[];
+  embedded?: boolean;
+  onClose?: () => void;
+};
+
 const metricIcons: Record<MetricKey, ComponentType<{ className?: string }>> = {
   foreignVisitors: UsersRound,
   accommodationSpending: CircleDollarSign,
@@ -54,12 +60,21 @@ function formatAxis(value: number) {
   return value.toLocaleString();
 }
 
-export function ComparePage() {
+export function ComparePage({ regionsOverride, embedded = false, onClose }: ComparePageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
-  const regions = ((location.state as { regions?: CompareRegion[] } | null)?.regions || []).slice(0, 3);
+  const regions = (regionsOverride || (location.state as { regions?: CompareRegion[] } | null)?.regions || []).slice(0, 3);
+  const shouldSlideIn = Boolean((location.state as { slideIn?: boolean } | null)?.slideIn);
+  const [isVisible, setIsVisible] = useState(embedded || !shouldSlideIn);
+  const [isExiting, setIsExiting] = useState(false);
   const [xMetric, setXMetric] = useState<MetricKey>("landPrice");
   const [yMetric, setYMetric] = useState<MetricKey>("accommodationBusinesses");
+
+  useEffect(() => {
+    if (embedded || !shouldSlideIn) return;
+    const frame = window.requestAnimationFrame(() => setIsVisible(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [embedded, shouldSlideIn]);
 
   const comparisonRows = useMemo(() => buildComparisonRows(regions), [regions]);
 
@@ -112,29 +127,36 @@ export function ComparePage() {
 
   const hasRegions = comparisonRows.length > 0;
   const scatterPlaceholder = scatterData.length === 0;
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+      return;
+    }
+
+    setIsExiting(true);
+    window.setTimeout(() => navigate("/"), 520);
+  };
 
   return (
-    <div className="relative min-h-screen bg-gray-100 p-6 text-gray-900">
+    <div
+      className={`relative min-h-screen bg-gray-100 p-6 text-gray-900 ${
+        embedded
+          ? "min-h-full"
+          : `transition-transform duration-500 ease-out ${
+              isExiting ? "translate-x-full" : isVisible ? "translate-x-0" : "translate-x-full"
+            }`
+      }`}
+    >
       <button
-        onClick={() => navigate("/")}
-        className="fixed left-8 bottom-8 w-14 h-14 bg-white rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 border-gray-200 hover:border-blue-500 z-50"
+        onClick={handleClose}
+        className="fixed left-0 top-1/2 -translate-y-1/2 group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-r border-gray-200 hover:border-blue-500 z-50"
         aria-label="메인페이지로 돌아가기"
       >
-        <ArrowLeft className="w-7 h-7 text-blue-600" />
+        <span className="w-0 h-0 border-y-[9px] border-y-transparent border-l-[13px] border-l-blue-600 transition-transform group-hover:translate-x-0.5" />
       </button>
 
       <main className="max-w-[1440px] mx-auto min-h-[calc(100vh-3rem)] flex flex-col gap-4">
         <section className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5">
-          <div className="flex items-start justify-between gap-5 mb-5">
-            <div>
-              <p className="text-sm font-bold text-blue-600 mb-1">지역 비교</p>
-              <h1 className="text-2xl font-black tracking-tight">선택 지역 비교 대시보드</h1>
-            </div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full">
-              {regions.length}/3 선택
-            </span>
-          </div>
-
           {hasRegions ? (
             <div className="grid grid-cols-3 gap-4">
               {comparisonRows.map((row, index) => (

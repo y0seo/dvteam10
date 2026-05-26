@@ -83,11 +83,11 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
   const currentRegion = regionsInfo.find(r => r.id === (hoveredRegion || selectedRegion));
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-transparent overflow-hidden">
+    <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
       <style>{dynamicStyles}</style>
 
       {currentRegion && (
-        <div className="absolute top-6 left-6 bg-white px-6 py-4 rounded-2xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
+        <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
             {currentRegion.name} 관광객 수
           </p>
@@ -100,7 +100,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
 
       <div 
         ref={mapContainerRef}
-        className="relative w-full max-w-[450px] h-full flex items-center justify-center [&>svg]:drop-shadow-lg"
+        className="relative w-[94%] max-w-[680px] h-[94%] flex items-center justify-center [&>svg]:drop-shadow-lg"
         onClick={(e) => handleInteraction(e, "click")}
         onMouseMove={(e) => handleInteraction(e, "hover")}
         onMouseLeave={() => {
@@ -110,14 +110,14 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 
-      <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-xs font-bold text-gray-700 mb-3">외국인 방문자수</p>
-        <div className="flex items-stretch gap-3">
+      <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
+        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <div className="flex items-stretch gap-2.5">
           <div
-            className="w-4 h-36 rounded-full border border-slate-200"
+            className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
-          <div className="flex h-36 flex-col justify-between text-[11px] font-semibold text-gray-600">
+          <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
             <span>{formatVisitorsInMan(colorScaleMax)}</span>
             <span>0명</span>
           </div>

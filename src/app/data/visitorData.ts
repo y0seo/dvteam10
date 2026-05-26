@@ -52,12 +52,42 @@ const visitorRows: VisitorRow[] = visitorsCsvRaw
 const isInMonthRange = (month: string, startMonth: string, endMonth: string) =>
   month >= startMonth && month <= endMonth;
 
-export function getProvinceVisitorTotals(startMonth: string, endMonth: string) {
-  const totals: Record<string, number> = {};
-  const seenProvinceMonths = new Set<string>();
+const getMonthNumber = (month: string) => Number(month.slice(5, 7));
 
+const averageTotals = (sums: Record<string, number>, counts: Record<string, number>) =>
+  Object.fromEntries(
+    Object.entries(sums).map(([key, sum]) => [key, Math.round(sum / Math.max(counts[key] || 1, 1))]),
+  );
+
+export function getProvinceVisitorTotals(selectedMonth: number): Record<string, number>;
+export function getProvinceVisitorTotals(startMonth: string, endMonth: string): Record<string, number>;
+export function getProvinceVisitorTotals(monthOrStart: number | string, endMonth = "2025-12") {
+  const totals: Record<string, number> = {};
+
+  if (typeof monthOrStart === "number") {
+    const counts: Record<string, number> = {};
+    const seenProvinceMonths = new Set<string>();
+
+    for (const row of visitorRows) {
+      if (getMonthNumber(row.month) !== monthOrStart) continue;
+
+      const provinceId = provinceCsvNameToId[row.provinceName];
+      if (!provinceId) continue;
+
+      const key = `${row.month}|${row.provinceName}`;
+      if (seenProvinceMonths.has(key)) continue;
+
+      seenProvinceMonths.add(key);
+      totals[provinceId] = (totals[provinceId] || 0) + row.provinceVisitors;
+      counts[provinceId] = (counts[provinceId] || 0) + 1;
+    }
+
+    return averageTotals(totals, counts);
+  }
+
+  const seenProvinceMonths = new Set<string>();
   for (const row of visitorRows) {
-    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
+    if (!isInMonthRange(row.month, monthOrStart, endMonth)) continue;
 
     const provinceId = provinceCsvNameToId[row.provinceName];
     if (!provinceId) continue;
@@ -72,15 +102,31 @@ export function getProvinceVisitorTotals(startMonth: string, endMonth: string) {
   return totals;
 }
 
-export function getDistrictVisitorTotals(regionId: string, startMonth: string, endMonth: string) {
+export function getDistrictVisitorTotals(regionId: string, selectedMonth: number): Record<string, number>;
+export function getDistrictVisitorTotals(regionId: string, startMonth: string, endMonth: string): Record<string, number>;
+export function getDistrictVisitorTotals(regionId: string, monthOrStart: number | string, endMonth = "2025-12") {
   const provinceName = provinceIdToCsvName[regionId];
   const totals: Record<string, number> = {};
 
   if (!provinceName) return totals;
 
+  if (typeof monthOrStart === "number") {
+    const counts: Record<string, number> = {};
+
+    for (const row of visitorRows) {
+      if (row.provinceName !== provinceName) continue;
+      if (getMonthNumber(row.month) !== monthOrStart) continue;
+
+      totals[row.districtName] = (totals[row.districtName] || 0) + row.districtVisitors;
+      counts[row.districtName] = (counts[row.districtName] || 0) + 1;
+    }
+
+    return averageTotals(totals, counts);
+  }
+
   for (const row of visitorRows) {
     if (row.provinceName !== provinceName) continue;
-    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
+    if (!isInMonthRange(row.month, monthOrStart, endMonth)) continue;
 
     totals[row.districtName] = (totals[row.districtName] || 0) + row.districtVisitors;
   }
@@ -148,11 +194,15 @@ export function getRegionMonthlyVisitorTrend(
 }
 
 export function getProvinceVisitorScaleMax() {
-  const totals = getProvinceVisitorTotals("2023-01", "2025-12");
-  return Math.max(...Object.values(totals), 1);
+  const monthlyMaxes = Array.from({ length: 12 }, (_, index) =>
+    Math.max(...Object.values(getProvinceVisitorTotals(index + 1)), 1),
+  );
+  return Math.max(...monthlyMaxes, 1);
 }
 
 export function getDistrictVisitorScaleMax(regionId: string) {
-  const totals = getDistrictVisitorTotals(regionId, "2023-01", "2025-12");
-  return Math.max(...Object.values(totals), 1);
+  const monthlyMaxes = Array.from({ length: 12 }, (_, index) =>
+    Math.max(...Object.values(getDistrictVisitorTotals(regionId, index + 1)), 1),
+  );
+  return Math.max(...monthlyMaxes, 1);
 }

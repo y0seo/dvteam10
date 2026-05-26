@@ -130,14 +130,14 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   }, [svgContent, selectedCompareSubRegions]);
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-transparent overflow-hidden">
+    <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
       <style>{dynamicStyles}</style>
 
-      <div className="absolute top-3 left-3 z-20 flex flex-col gap-4">
-        <button onClick={onBack} className="w-12 h-12 flex items-center justify-center bg-white border border-gray-200 shadow-md rounded-full hover:bg-gray-100 text-2xl font-bold text-gray-600">
+      <div className="absolute top-5 left-5 z-20 flex flex-col gap-4">
+        <button onClick={onBack} className="w-14 h-14 flex items-center justify-center bg-white border border-gray-200 shadow-md rounded-full hover:bg-gray-100 text-3xl font-bold text-gray-600">
           ←
         </button>
-        <div className="bg-white/90 backdrop-blur-md px-6 py-4 rounded-2xl shadow-xl border border-blue-100 min-w-[200px]">
+        <div className="bg-white/90 backdrop-blur-md px-5 py-4 rounded-xl shadow-xl border border-blue-100 min-w-[184px]">
           <p className="text-sm font-semibold text-gray-500 mb-1">
             {selectedSubRegion ? subRegionMap[selectedSubRegion] : "구역을 선택하세요"}
           </p>
@@ -150,7 +150,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
       <div 
         ref={mapContainerRef}
-        className="relative w-full max-w-[450px] h-[80%] flex items-center justify-center mt-12 [&>svg]:drop-shadow-lg"
+        className="relative w-[94%] max-w-[680px] h-[88%] flex items-center justify-center mt-12 [&>svg]:drop-shadow-lg"
         onClick={(e) => {
           const target = e.target as SVGElement;
           const id = target.id || target.closest('path')?.id;
@@ -159,11 +159,11 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 
-      <div className="absolute left-1/2 top-[calc(50%+1.5rem)] z-30 w-full max-w-[450px] h-[80%] -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+      <div className="absolute left-1/2 top-[calc(50%+1.5rem)] z-30 w-[94%] max-w-[680px] h-[88%] -translate-x-1/2 -translate-y-1/2 pointer-events-none">
         {checkMarkers.map((marker) => (
           <div
             key={marker.id}
-            className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-white flex items-center justify-center text-base font-black"
+            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
             style={{ left: marker.x, top: marker.y }}
           >
             ✓
@@ -172,14 +172,14 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       </div>
 
       {/* 범례 */}
-      <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-xs font-bold text-gray-700 mb-3">외국인 방문자수</p>
-        <div className="flex items-stretch gap-3">
+      <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
+        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <div className="flex items-stretch gap-2.5">
           <div
-            className="w-4 h-36 rounded-full border border-slate-200"
+            className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
-          <div className="flex h-36 flex-col justify-between text-[11px] font-semibold text-gray-600">
+          <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
             <span>{formatVisitorsInMan(colorScaleMax)}</span>
             <span>0명</span>
           </div>
