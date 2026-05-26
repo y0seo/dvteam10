@@ -32,6 +32,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
 
+  
   useEffect(() => {
     if (KoreaMapSvgRaw) {
       const responsiveSvg = KoreaMapSvgRaw
@@ -41,6 +42,20 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
     }
   }, []);
 
+  
+  useEffect(() => {
+    if (!selectedRegion || !mapContainerRef.current) return;
+
+    const svgElement = mapContainerRef.current.querySelector("svg");
+    if (svgElement) {
+      const regionElement = svgElement.querySelector(`#${selectedRegion}`);
+      if (regionElement && regionElement.parentNode) {
+        svgElement.appendChild(regionElement); 
+      }
+    }
+  }, [selectedRegion, svgContent]);
+
+  
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
@@ -49,12 +64,26 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
 
+      // default
+      let strokeColor = "#ffffff";
+      let strokeWidth = "0.5px";
+
+      // cond
+      if (isHovered) {
+        strokeColor = "#c17aab"; 
+        strokeWidth = "3px";
+      } else if (isSelected) {
+        strokeColor = "#c1907a";  
+        strokeWidth = "2px";
+      }
+
       styles += `
         svg #${region.id} {
+          stroke: ${strokeColor} !important;
+          stroke-width: ${strokeWidth} !important;
           fill: ${heatmapColor} !important;
-          stroke: ${isSelected || isHovered ? "#fbbf24" : "#ffffff"} !important;
-          stroke-width: ${isSelected || isHovered ? "2.5px" : "0.6px"} !important;
-          transition: fill 0.3s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+          vector-effect: non-scaling-stroke; 
+          transition: fill 0.3s ease, stroke 0.3s ease, stroke-width 0.3s ease;
           cursor: pointer;
         }
       `;
@@ -64,11 +93,17 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
 
   const validIds = regionsInfo.map(r => r.id);
 
+  
   const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover") => {
     const target = e.target as SVGElement;
-    const regionId = target.id || target.closest('g')?.id || target.closest('path')?.id;
+    const regionElement = target.id ? target : (target.closest('g') || target.closest('path'));
+    const regionId = regionElement?.id;
     
     if (regionId && validIds.includes(regionId)) {
+      if (type === "hover" && regionElement && regionElement.parentNode) {
+        regionElement.parentNode.appendChild(regionElement);
+      }
+
       if (type === "click") onRegionClick(regionId);
       if (type === "hover") {
         setHoveredRegion(regionId);
@@ -86,6 +121,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
       <style>{dynamicStyles}</style>
 
+      {/* 정보창 상단 팝업 */}
       {currentRegion && (
         <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
@@ -98,6 +134,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
         </div>
       )}
 
+      {/* 지도 렌더링 영역 */}
       <div 
         ref={mapContainerRef}
         className="relative w-[94%] max-w-[680px] h-[94%] flex items-center justify-center [&>svg]:drop-shadow-lg"
@@ -110,6 +147,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 
+      {/* 우측 하단 범례 */}
       <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
         <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
         <div className="flex items-stretch gap-2.5">
