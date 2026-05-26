@@ -1,12 +1,18 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 
-import KoreaMapSvgRaw from "../../imports/kr1.svg?raw"; 
+import KoreaMapSvgRaw from "../../imports/kr1.svg?raw";
+import {
+  HEATMAP_GRADIENT,
+  formatVisitorsInMan,
+  getHeatmapColor,
+} from "../data/heatmapPalette";
 
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
   onRegionHover: (region: string | null) => void; 
   selectedRegion: string | null;
   visitorData: { [key: string]: number };
+  colorScaleMax: number;
 }
 
 const regionsInfo = [
@@ -21,22 +27,10 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-// Color Intensity 
-const getHeatmapColor = (value: number, min: number, max: number): string => {
-  if (min === max) return `rgba(255, 99, 91, 0.5)`; // 기본 
-  const normalized = (value - min) / (max - min || 1);
-  const opacity = 0.15 + normalized * 0.85; // 최소 투명도 15% ~ 최대 100%
-  return `rgba(255, 99, 91, ${opacity})`;
-};
-
-export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
-
-  const visitorValues = Object.values(visitorData);
-  const minVisitors = Math.min(...visitorValues, 0);
-  const maxVisitors = Math.max(...visitorValues, 1);
 
   useEffect(() => {
     if (KoreaMapSvgRaw) {
@@ -51,22 +45,22 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
     let styles = "";
     regionsInfo.forEach((region) => {
       const visitors = visitorData[region.id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, minVisitors, maxVisitors);
+      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
 
       styles += `
         svg #${region.id} {
           fill: ${heatmapColor} !important;
-          stroke: ${isSelected || isHovered ? "#1e3a8a" : "#ffffff"} !important;
-          stroke-width: ${isSelected || isHovered ? "2.5px" : "0.5px"} !important;
+          stroke: ${isSelected || isHovered ? "#fbbf24" : "#ffffff"} !important;
+          stroke-width: ${isSelected || isHovered ? "2.5px" : "0.6px"} !important;
           transition: fill 0.3s ease, stroke 0.2s ease, stroke-width 0.2s ease;
           cursor: pointer;
         }
       `;
     });
     return styles;
-  }, [visitorData, selectedRegion, hoveredRegion, minVisitors, maxVisitors]);
+  }, [visitorData, selectedRegion, hoveredRegion, colorScaleMax]);
 
   const validIds = regionsInfo.map(r => r.id);
 
@@ -89,11 +83,11 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
   const currentRegion = regionsInfo.find(r => r.id === (hoveredRegion || selectedRegion));
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-transparent overflow-hidden">
+    <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
       <style>{dynamicStyles}</style>
 
       {currentRegion && (
-        <div className="absolute top-6 left-6 bg-white px-6 py-4 rounded-2xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
+        <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
             {currentRegion.name} 관광객 수
           </p>
@@ -106,7 +100,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
 
       <div 
         ref={mapContainerRef}
-        className="relative w-full max-w-[450px] h-full flex items-center justify-center [&>svg]:drop-shadow-lg"
+        className="relative w-[94%] max-w-[680px] h-[94%] flex items-center justify-center [&>svg]:drop-shadow-lg"
         onClick={(e) => handleInteraction(e, "click")}
         onMouseMove={(e) => handleInteraction(e, "hover")}
         onMouseLeave={() => {
@@ -116,19 +110,17 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 
-      <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-xs font-bold text-gray-700 mb-3">방문객 밀집도</p>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "rgba(255, 99, 91, 0.2)" }}></div>
-          <span className="text-[11px] font-medium text-gray-600">적음</span>
-        </div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "rgba(255, 99, 91, 0.6)" }}></div>
-          <span className="text-[11px] font-medium text-gray-600">보통</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "rgba(255, 99, 91, 1)" }}></div>
-          <span className="text-[11px] font-medium text-gray-600">많음</span>
+      <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
+        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <div className="flex items-stretch gap-2.5">
+          <div
+            className="w-3 h-[106px] rounded-full border border-slate-200"
+            style={{ background: HEATMAP_GRADIENT }}
+          />
+          <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
+            <span>{formatVisitorsInMan(colorScaleMax)}</span>
+            <span>0명</span>
+          </div>
         </div>
       </div>
     </div>
