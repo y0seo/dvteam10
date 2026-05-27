@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { CircleDollarSign, Hotel, MapPinned, UsersRound } from "lucide-react";
+import { ArrowDownWideNarrow, CircleDollarSign, Hotel, MapPinned, UsersRound } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import {
   CartesianGrid,
@@ -48,6 +48,10 @@ const scatterOptions: { key: MetricKey; label: string }[] = [
   { key: "accommodationSpending", label: "숙박 소비액" },
 ];
 
+const metricFallbackLabels = Object.fromEntries(
+  scatterOptions.map((option) => [option.key, option.label]),
+) as Record<MetricKey, string>;
+
 function formatMetricValue(value: number | null, unit: string) {
   if (value == null) return "데이터 연결 전";
   if (unit === "만원") return `${value.toLocaleString()}만원`;
@@ -69,6 +73,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
   const [isExiting, setIsExiting] = useState(false);
   const [xMetric, setXMetric] = useState<MetricKey>("landPrice");
   const [yMetric, setYMetric] = useState<MetricKey>("accommodationBusinesses");
+  const [sortMetric, setSortMetric] = useState<MetricKey | null>(null);
 
   useEffect(() => {
     if (embedded || !shouldSlideIn) return;
@@ -205,19 +210,48 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           {comparisonMetricKeys.map((key) => {
             const Icon = metricIcons[key];
             const firstMetric = comparisonRows[0]?.metrics[key];
+            const metricRows = sortMetric === key
+              ? [...comparisonRows].sort((a, b) => {
+                  const valueA = a.metrics[key].value ?? Number.NEGATIVE_INFINITY;
+                  const valueB = b.metrics[key].value ?? Number.NEGATIVE_INFINITY;
+                  return valueB - valueA;
+                })
+              : comparisonRows;
+
             return (
               <div key={key} className="bg-white rounded-xl shadow-lg border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-gray-800">{firstMetric?.label || key}</h3>
-                  <Icon className="w-5 h-5 text-blue-600" />
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-bold text-gray-800">
+                    {firstMetric?.label || metricFallbackLabels[key]}
+                  </h3>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setSortMetric((prev) => (prev === key ? null : key))}
+                      className={`h-7 px-2 rounded-lg border text-[10px] font-bold transition-colors flex items-center gap-1 ${
+                        sortMetric === key
+                          ? "bg-blue-600 border-blue-600 text-white"
+                          : "bg-gray-50 border-gray-200 text-gray-500 hover:border-blue-400 hover:text-blue-600"
+                      }`}
+                      aria-pressed={sortMetric === key}
+                      title={sortMetric === key ? "정렬 해제" : "내림차순 정렬"}
+                    >
+                      <ArrowDownWideNarrow className="w-3.5 h-3.5" />
+                      내림차순
+                    </button>
+                    <Icon className="w-5 h-5 text-blue-600" />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   {comparisonRows.length > 0 ? (
-                    comparisonRows.map((row, index) => {
+                    metricRows.map((row) => {
                       const metric = row.metrics[key];
+                      const colorIndex = comparisonRows.findIndex(
+                        (item) => item.region.id === row.region.id && item.region.provinceId === row.region.provinceId,
+                      );
+                      const regionColor = REGION_COLORS[Math.max(colorIndex, 0)];
                       return (
                         <div key={row.region.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="font-bold truncate" style={{ color: REGION_COLORS[index] }}>
+                          <span className="font-bold truncate" style={{ color: regionColor }}>
                             {row.region.name}
                           </span>
                           <span
@@ -244,7 +278,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           })}
         </section>
 
-        <section className="grid grid-cols-[0.9fr_1.1fr] gap-4 flex-1 min-h-[360px]">
+        <section className="grid grid-cols-[1.25fr_0.75fr] gap-4 flex-1 min-h-[420px]">
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-5 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-gray-800">정규화 레이더 비교</h3>
@@ -321,7 +355,13 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                       formatter={(value: number, name: string) => [value.toLocaleString(), name]}
                     />
                     {scatterData.map((point) => (
-                      <Scatter key={point.name} name={point.name} data={[point]} fill={point.color} />
+                      <Scatter
+                        key={point.name}
+                        name={point.name}
+                        data={[point]}
+                        fill={point.color}
+                        shape={(props) => <ScatterMetricShape {...props} metricKey={yMetric} />}
+                      />
                     ))}
                     <Legend wrapperStyle={{ fontSize: "11px", fontWeight: 700 }} />
                   </ScatterChart>
@@ -379,6 +419,86 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
         </section>
       </main>
     </div>
+  );
+}
+
+type ScatterMetricShapeProps = {
+  cx?: number;
+  cy?: number;
+  fill?: string;
+  payload?: { color?: string };
+  metricKey: MetricKey;
+};
+
+function ScatterMetricShape({ cx = 0, cy = 0, fill = "#2563eb", payload, metricKey }: ScatterMetricShapeProps) {
+  const color = payload?.color || fill;
+  const strokeColor = "#ffffff";
+
+  if (metricKey === "foreignVisitors") {
+    return (
+      <g transform={`translate(${cx - 12}, ${cy - 12})`}>
+        <circle cx="8" cy="8" r="4.2" fill={color} stroke={strokeColor} strokeWidth="1.7" />
+        <circle cx="16" cy="8" r="4.2" fill={color} stroke={strokeColor} strokeWidth="1.7" opacity="0.85" />
+        <path
+          d="M3.5 20c.8-4 3.1-6.2 6.5-6.2s5.7 2.2 6.5 6.2"
+          fill={color}
+          stroke={strokeColor}
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M10.5 20c.7-3.5 2.8-5.5 5.7-5.5 2.7 0 4.5 1.8 5.3 5.5"
+          fill={color}
+          stroke={strokeColor}
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+          opacity="0.85"
+        />
+      </g>
+    );
+  }
+
+  if (metricKey === "accommodationSpending") {
+    return (
+      <g transform={`translate(${cx - 12}, ${cy - 12})`}>
+        <circle cx="12" cy="12" r="10" fill={color} stroke={strokeColor} strokeWidth="2" />
+        <path
+          d="M12 5.5v13M8.3 9c.5-1.3 1.8-2.1 3.6-2.1 2 0 3.4.9 3.4 2.4 0 1.7-1.7 2.2-3.5 2.7-1.9.5-3.6 1.1-3.6 2.9 0 1.6 1.5 2.6 3.7 2.6 2 0 3.5-.8 4-2.2"
+          fill="none"
+          stroke={strokeColor}
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+      </g>
+    );
+  }
+
+  if (metricKey === "landPrice") {
+    return (
+      <g transform={`translate(${cx - 12}, ${cy - 14})`}>
+        <path
+          d="M12 27S4 17.4 4 10.7C4 5.8 7.6 2 12 2s8 3.8 8 8.7C20 17.4 12 27 12 27Z"
+          fill={color}
+          stroke={strokeColor}
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="10.5" r="3.2" fill={strokeColor} />
+      </g>
+    );
+  }
+
+  return (
+    <g transform={`translate(${cx - 12}, ${cy - 12})`}>
+      <path
+        d="M5 21V8.2L12 3l7 5.2V21H5Z"
+        fill={color}
+        stroke={strokeColor}
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+      <path d="M9 21v-6h6v6M8 10h2.5M13.5 10H16M8 13h2.5M13.5 13H16" stroke={strokeColor} strokeLinecap="round" strokeWidth="1.7" />
+    </g>
   );
 }
 

@@ -1,4 +1,9 @@
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   CartesianGrid,
   Cell,
@@ -39,17 +44,25 @@ type HighlightedScatterPointPayload = ScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
 };
 
+interface HighlightedScatterPointProps {
+  cx?: number;
+  cy?: number;
+  fill?: string;
+  payload?: HighlightedScatterPointPayload;
+  cursor?: string;
+  onPointClick?: (item: ScatterDataItem) => void;
+  onPointHover?: (item: ScatterDataItem | null) => void;
+}
+
 function HighlightedScatterPoint({
   cx,
   cy,
   fill,
   payload,
-}: {
-  cx?: number;
-  cy?: number;
-  fill?: string;
-  payload?: HighlightedScatterPointPayload;
-}) {
+  cursor = "default",
+  onPointClick,
+  onPointHover,
+}: HighlightedScatterPointProps) {
   if (typeof cx !== "number" || typeof cy !== "number") return null;
 
   const highlightState = payload?.highlightState;
@@ -60,8 +73,30 @@ function HighlightedScatterPoint({
   const strokeWidth = isSelected || isHovered ? 3 : 1.5;
   const pointFill = isSelected ? "#fed7aa" : isHovered ? "#fbcfe8" : fill;
 
+  const handlePin = (
+    event: ReactMouseEvent<SVGGElement> | ReactPointerEvent<SVGGElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!payload) return;
+    onPointClick?.(payload);
+  };
+
   return (
-    <g>
+    <g
+      cursor={cursor}
+      data-scatter-hit="true"
+      pointerEvents="all"
+      onPointerDown={handlePin}
+      onMouseEnter={() => {
+        if (!payload) return;
+        onPointHover?.(payload);
+      }}
+      onMouseLeave={() => {
+        onPointHover?.(null);
+      }}
+    >
+      <circle cx={cx} cy={cy} r={16} fill="#ffffff" opacity={0} pointerEvents="all" />
       {(isSelected || isHovered) && (
         <circle
           cx={cx}
@@ -115,11 +150,23 @@ export function InfrastructureScatterPlot({
   onDataPointHover,
 }: InfrastructureScatterPlotProps) {
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
+  const [clickedPointId, setClickedPointId] = useState<string | null>(null);
   const scatterData = useMemo(
     () => getScatterData(currentViewLevel),
     [currentViewLevel],
   );
-  const activePiePoint = hoveredPoint;
+  const clickedPoint = useMemo(
+    () => scatterData.find((entry) => entry.id === clickedPointId) ?? null,
+    [clickedPointId, scatterData],
+  );
+  const selectedPoint = useMemo(
+    () =>
+      scatterData.find(
+        (entry) => selectedSubRegion === entry.id || selectedSubRegionName === entry.name,
+      ) ?? null,
+    [scatterData, selectedSubRegion, selectedSubRegionName],
+  );
+  const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint;
   const highlightedScatterData = useMemo(
     () =>
       scatterData.map((entry) => {
@@ -129,6 +176,10 @@ export function InfrastructureScatterPlot({
             : hoveredSubRegion === entry.id ||
               hoveredPoint?.id === entry.id ||
               hoveredPoint?.name === entry.name;
+        const isClicked =
+          currentViewLevel === "national"
+            ? clickedPointId === entry.id
+            : clickedPointId === entry.id;
         const isSelected =
           currentViewLevel === "national"
             ? selectedRegion === entry.id
@@ -136,10 +187,11 @@ export function InfrastructureScatterPlot({
 
         return {
           ...entry,
-          highlightState: isHovered ? "hovered" : isSelected ? "selected" : null,
+          highlightState: isClicked || isSelected ? "selected" : isHovered ? "hovered" : null,
         };
       }),
     [
+      clickedPointId,
       currentViewLevel,
       hoveredPoint,
       hoveredSubRegion,
@@ -166,13 +218,44 @@ export function InfrastructureScatterPlot({
     [pieData],
   );
 
+  const handlePointHover = (item: ScatterDataItem | null) => {
+    setHoveredPoint(item);
+    onDataPointHover?.(item);
+  };
+
+  const handleChartMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("[data-scatter-hit='true']")) return;
+    if (!hoveredPoint) return;
+    handlePointHover(null);
+  };
+
+  const handlePointClick = (item: ScatterDataItem) => {
+    setClickedPointId((prevId) => {
+      if (prevId === item.id) {
+        handlePointHover(null);
+        return null;
+      }
+      return item.id;
+    });
+    onDataPointClick?.(item);
+  };
+
   return (
     <div className="relative w-full h-full bg-white rounded-xl shadow-lg p-6 border-[0.5px] border-gray-200 flex flex-col min-h-0">
       <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
         <span>지역별 지가 대비 숙박 인프라 현황 분석</span>
       </h3>
 
-      <div className="flex-1 min-h-0">
+      <div
+        className="flex-1 min-h-0"
+        onMouseMove={handleChartMouseMove}
+        onMouseLeave={() => {
+          setHoveredPoint(null);
+          onDataPointHover?.(null);
+        }}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 14, right: 26, bottom: 22, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -208,21 +291,14 @@ export function InfrastructureScatterPlot({
             <Tooltip cursor={{ strokeDasharray: "3 3", stroke: "#cbd5e1" }} content={() => null} />
             <Scatter
               data={highlightedScatterData}
-              shape={<HighlightedScatterPoint />}
+              shape={
+                <HighlightedScatterPoint
+                  cursor={onDataPointClick ? "pointer" : "default"}
+                  onPointClick={handlePointClick}
+                  onPointHover={handlePointHover}
+                />
+              }
               cursor={onDataPointClick ? "pointer" : "default"}
-              onMouseEnter={(payload: { payload?: ScatterDataItem }) => {
-                if (!payload.payload) return;
-                setHoveredPoint(payload.payload);
-                onDataPointHover?.(payload.payload);
-              }}
-              onMouseLeave={() => {
-                setHoveredPoint(null);
-                onDataPointHover?.(null);
-              }}
-              onClick={(payload: { payload?: ScatterDataItem }) => {
-                if (!payload.payload) return;
-                onDataPointClick?.(payload.payload);
-              }}
             >
               {highlightedScatterData.map((entry) => (
                 <Cell key={entry.id} fill={HEATMAP_PALETTE[4]} />
@@ -232,10 +308,11 @@ export function InfrastructureScatterPlot({
         </ResponsiveContainer>
 
         {activePiePoint && (
-          <div className="absolute right-0 top-0 z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
+          <div className="pointer-events-none absolute right-0 top-0 z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
                 <p className="text-xs font-bold text-gray-800 truncate">{activePiePoint.name}</p>
+                <p className="text-[10px] font-semibold text-gray-400 mt-0.5">숙박업소 현황</p>
               </div>
               <span className="shrink-0 text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                 {pieTotal.toLocaleString()}개
