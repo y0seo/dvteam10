@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { Check, ShoppingCart } from "lucide-react";
+import { Check, ShoppingCart, X } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Legend } from "recharts";
 import { useState, useMemo } from "react";
 import { KoreaMap } from "./KoreaMap";
@@ -72,6 +72,7 @@ export function MainPage() {
 
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
+  const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isCompareLaunching, setIsCompareLaunching] = useState(false);
   const [isCompareClosing, setIsCompareClosing] = useState(false);
@@ -119,13 +120,14 @@ export function MainPage() {
     [highlightedCountry, selectedMonth],
   );
 
-  const showAccommodation = currentViewLevel !== "national" && selectedSubRegion !== null;
+  const showAccommodation = currentViewLevel !== "national";
   const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
   const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
 
   const handleSubRegionSelect = (subId: string, subName: string) => {
-    setSelectedSubRegion(subId);
-    setSelectedSubRegionName(subName);
+    const isSameSelected = selectedSubRegion === subId || selectedSubRegionName === subName;
+    setSelectedSubRegion(isSameSelected ? null : subId);
+    setSelectedSubRegionName(isSameSelected ? null : subName);
 
     if (!isCompareMode) return;
 
@@ -134,6 +136,10 @@ export function MainPage() {
       if (prev.length >= 3) return prev;
       return [...prev, { id: subId, name: subName, provinceId: currentViewLevel, provinceName: currentProvinceName }];
     });
+  };
+
+  const removeCompareRegion = (regionId: string) => {
+    setCompareRegions((prev) => prev.filter((region) => region.id !== regionId));
   };
 
   const goToComparePage = () => {
@@ -215,10 +221,22 @@ export function MainPage() {
                   compareRegions.map((region) => (
                     <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
                       <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
                         <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeCompareRegion(region.id);
+                        }}
+                        className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        aria-label={`${region.name} 비교 지역에서 제거`}
+                        title="비교 지역에서 제거"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   ))
                 )}
@@ -233,6 +251,7 @@ export function MainPage() {
               setSelectedRegion(id);
               setSelectedSubRegion(null);
               setSelectedSubRegionName(null); 
+              setHoveredSubRegion(null);
               setCurrentViewLevel(id);
             }}
             onRegionHover={setHoveredRegion}
@@ -247,11 +266,14 @@ export function MainPage() {
               setCurrentViewLevel("national");
               setSelectedSubRegion(null);
               setSelectedSubRegionName(null);
+              setHoveredSubRegion(null);
             }}
             visitorData={subRegionVisitorData}
             colorScaleMax={subRegionVisitorScaleMax}
             onSubRegionClick={handleSubRegionSelect}
+            onSubRegionHover={setHoveredSubRegion}
             selectedSubRegion={selectedSubRegion}
+            externalHoveredSubRegion={hoveredSubRegion}
             selectedCompareSubRegions={compareRegionIds}
           />
         )}
@@ -314,7 +336,9 @@ export function MainPage() {
               selectedRegion={selectedRegion}
               selectedSubRegion={selectedSubRegion}
               selectedSubRegionName={selectedSubRegionName}
+              hoveredSubRegion={hoveredSubRegion}
               regionsInfo={regionsInfo}
+              onDataPointHover={(item) => setHoveredSubRegion(item?.id ?? null)}
               onDataPointClick={(item) => {
                 if (currentViewLevel === "national") {
                   setSelectedRegion(item.id);
@@ -399,8 +423,8 @@ export function MainPage() {
                         data={companionPieData}
                         dataKey="value"
                         nameKey="name"
-                        innerRadius="42%"
-                        outerRadius="68%"
+                        innerRadius="50%"
+                        outerRadius="82%"
                         paddingAngle={2}
                         stroke="#ffffff"
                         strokeWidth={2}

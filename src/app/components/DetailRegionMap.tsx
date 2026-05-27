@@ -48,11 +48,13 @@ interface DetailRegionMapProps {
   visitorData: Record<string, number>;
   colorScaleMax: number;
   onSubRegionClick: (subId: string, subName: string) => void; 
+  onSubRegionHover?: (subId: string | null) => void;
   selectedSubRegion: string | null;
+  externalHoveredSubRegion?: string | null;
   selectedCompareSubRegions?: string[];
 }
 
-export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, selectedSubRegion, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number }[]>([]);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
@@ -77,6 +79,12 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
   const subRegionIds = useMemo(() => Object.keys(subRegionMap), [subRegionMap]);
   const subRegionData = visitorData;
+  const activeHoveredSubRegion = hoveredSubRegion || externalHoveredSubRegion;
+
+  const updateHoveredSubRegion = (id: string | null) => {
+    setHoveredSubRegion(id);
+    onSubRegionHover?.(id);
+  };
   
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -89,11 +97,11 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       }
     };
 
-    if (hoveredSubRegion) bringToFront(hoveredSubRegion); 
+    if (activeHoveredSubRegion) bringToFront(activeHoveredSubRegion); 
     if (selectedCompareSubRegions.length > 0) selectedCompareSubRegions.forEach(bringToFront); 
     if (selectedSubRegion) bringToFront(selectedSubRegion); 
 
-  }, [selectedSubRegion, selectedCompareSubRegions, hoveredSubRegion, svgContent]);
+  }, [selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, svgContent]);
 
   const dynamicStyles = useMemo(() => {
     let styles = "";
@@ -102,7 +110,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
       const isSelected = selectedSubRegion === id;
       const isCompareSelected = selectedCompareSubRegions.includes(id);
-      const isHovered = hoveredSubRegion === id;
+      const isHovered = activeHoveredSubRegion === id;
 
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
@@ -130,7 +138,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       `;
     });
     return styles;
-  }, [subRegionData, selectedSubRegion, colorScaleMax, selectedCompareSubRegions, hoveredSubRegion, subRegionIds]);
+  }, [subRegionData, selectedSubRegion, colorScaleMax, selectedCompareSubRegions, activeHoveredSubRegion, subRegionIds]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -165,13 +173,13 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
     if (id && subRegionMap[id]) {
       if (type === "click") onSubRegionClick(id, subRegionMap[id]);
-      if (type === "hover") setHoveredSubRegion(id);
+      if (type === "hover") updateHoveredSubRegion(id);
     } else if (type === "hover") {
-      setHoveredSubRegion(null);
+      updateHoveredSubRegion(null);
     }
   };
 
-  const currentRegionId = hoveredSubRegion || selectedSubRegion;
+  const currentRegionId = activeHoveredSubRegion || selectedSubRegion;
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
@@ -197,7 +205,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
         className="relative w-[94%] max-w-[680px] h-[88%] flex items-center justify-center mt-12 [&>svg]:drop-shadow-lg"
         onClick={(e) => handleInteraction(e, "click")}
         onMouseMove={(e) => handleInteraction(e, "hover")}
-        onMouseLeave={() => setHoveredSubRegion(null)}
+        onMouseLeave={() => updateHoveredSubRegion(null)}
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 

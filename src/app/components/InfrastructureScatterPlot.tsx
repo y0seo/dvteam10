@@ -25,11 +25,65 @@ interface InfrastructureScatterPlotProps {
   selectedRegion: string;
   selectedSubRegion: string | null;
   selectedSubRegionName: string | null;
+  hoveredSubRegion?: string | null;
   regionsInfo: { id: string; name: string }[];
   onDataPointClick?: (item: ScatterDataItem) => void;
+  onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
 const PIE_COLORS = ["#2563eb", "#10b981", "#f97316", "#9ca3af"];
+const SELECTED_POINT_COLOR = "#ea580c";
+const HOVERED_POINT_COLOR = "#c17aab";
+
+type HighlightedScatterPointPayload = ScatterDataItem & {
+  highlightState?: "selected" | "hovered" | null;
+};
+
+function HighlightedScatterPoint({
+  cx,
+  cy,
+  fill,
+  payload,
+}: {
+  cx?: number;
+  cy?: number;
+  fill?: string;
+  payload?: HighlightedScatterPointPayload;
+}) {
+  if (typeof cx !== "number" || typeof cy !== "number") return null;
+
+  const highlightState = payload?.highlightState;
+  const isSelected = highlightState === "selected";
+  const isHovered = highlightState === "hovered";
+  const radius = isSelected || isHovered ? 7 : 5;
+  const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#ffffff";
+  const strokeWidth = isSelected || isHovered ? 3 : 1.5;
+  const pointFill = isSelected ? "#fed7aa" : isHovered ? "#fbcfe8" : fill;
+
+  return (
+    <g>
+      {(isSelected || isHovered) && (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius + 4}
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth={5}
+          opacity={0.95}
+        />
+      )}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={radius}
+        fill={pointFill}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    </g>
+  );
+}
 
 function PieTooltip({
   active,
@@ -55,8 +109,10 @@ export function InfrastructureScatterPlot({
   selectedRegion,
   selectedSubRegion,
   selectedSubRegionName,
+  hoveredSubRegion,
   regionsInfo,
   onDataPointClick,
+  onDataPointHover,
 }: InfrastructureScatterPlotProps) {
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
   const scatterData = useMemo(
@@ -64,6 +120,35 @@ export function InfrastructureScatterPlot({
     [currentViewLevel],
   );
   const activePiePoint = hoveredPoint;
+  const highlightedScatterData = useMemo(
+    () =>
+      scatterData.map((entry) => {
+        const isHovered =
+          currentViewLevel === "national"
+            ? hoveredPoint?.id === entry.id
+            : hoveredSubRegion === entry.id ||
+              hoveredPoint?.id === entry.id ||
+              hoveredPoint?.name === entry.name;
+        const isSelected =
+          currentViewLevel === "national"
+            ? selectedRegion === entry.id
+            : selectedSubRegion === entry.id || selectedSubRegionName === entry.name;
+
+        return {
+          ...entry,
+          highlightState: isHovered ? "hovered" : isSelected ? "selected" : null,
+        };
+      }),
+    [
+      currentViewLevel,
+      hoveredPoint,
+      hoveredSubRegion,
+      scatterData,
+      selectedRegion,
+      selectedSubRegion,
+      selectedSubRegionName,
+    ],
+  );
 
   const pieData = useMemo(
     () => getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null),
@@ -122,43 +207,35 @@ export function InfrastructureScatterPlot({
             <ZAxis range={[80, 180]} />
             <Tooltip cursor={{ strokeDasharray: "3 3", stroke: "#cbd5e1" }} content={() => null} />
             <Scatter
-              data={scatterData}
-              shape="circle"
+              data={highlightedScatterData}
+              shape={<HighlightedScatterPoint />}
               cursor={onDataPointClick ? "pointer" : "default"}
               onMouseEnter={(payload: { payload?: ScatterDataItem }) => {
-                if (payload.payload) setHoveredPoint(payload.payload);
+                if (!payload.payload) return;
+                setHoveredPoint(payload.payload);
+                onDataPointHover?.(payload.payload);
               }}
-              onMouseLeave={() => setHoveredPoint(null)}
+              onMouseLeave={() => {
+                setHoveredPoint(null);
+                onDataPointHover?.(null);
+              }}
               onClick={(payload: { payload?: ScatterDataItem }) => {
                 if (!payload.payload) return;
                 onDataPointClick?.(payload.payload);
               }}
             >
-              {scatterData.map((entry) => {
-                const isSelected =
-                  currentViewLevel === "national"
-                    ? selectedRegion === entry.id
-                    : selectedSubRegion === entry.id || selectedSubRegionName === entry.name;
-
-                return (
-                  <Cell
-                    key={entry.id}
-                    fill={HEATMAP_PALETTE[4]}
-                    stroke={isSelected ? "#ea580c" : "none"}
-                    strokeWidth={isSelected ? 3 : 0}
-                  />
-                );
-              })}
+              {highlightedScatterData.map((entry) => (
+                <Cell key={entry.id} fill={HEATMAP_PALETTE[4]} />
+              ))}
             </Scatter>
           </ScatterChart>
         </ResponsiveContainer>
 
         {activePiePoint && (
-          <div className="absolute right-0 top-0 z-20 w-[270px] h-[286px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
+          <div className="absolute right-0 top-0 z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-800">숙박업소 현황</p>
-                <p className="text-[11px] text-gray-500 truncate">{activePiePoint.name}</p>
+                <p className="text-xs font-bold text-gray-800 truncate">{activePiePoint.name}</p>
               </div>
               <span className="shrink-0 text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                 {pieTotal.toLocaleString()}개
@@ -188,8 +265,8 @@ export function InfrastructureScatterPlot({
                       data={pieData}
                       dataKey="value"
                       nameKey="name"
-                      innerRadius="45%"
-                      outerRadius="72%"
+                      innerRadius="57%"
+                      outerRadius="91%"
                       paddingAngle={2}
                       stroke="#ffffff"
                       strokeWidth={2}
