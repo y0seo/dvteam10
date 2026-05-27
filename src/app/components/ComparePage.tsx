@@ -67,6 +67,18 @@ function formatAxis(value: number) {
   return value.toLocaleString();
 }
 
+function renderAngleAxisTick(props: { x: number; y: number; payload: { value: string }; textAnchor?: string }) {
+  const { x, y, payload, textAnchor } = props;
+  let dy = 0;
+  if (payload.value === "방문자") dy = -8;
+  else if (payload.value === "숙박업소") dy = 8;
+  return (
+    <text x={x} y={y + dy} textAnchor={textAnchor} fontSize={11} fontWeight={700} fill="#374151">
+      {payload.value}
+    </text>
+  );
+}
+
 export function ComparePage({ regionsOverride, embedded = false, onClose }: ComparePageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -295,9 +307,29 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
 
         <section className="grid grid-cols-[1.5fr_0.8fr] gap-4 min-h-[360px]">
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-5 flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-800">정규화 레이더 비교</h3>
-              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <h3 className="text-sm font-bold text-gray-800 shrink-0">정규화 레이더 비교</h3>
+                {hasRegions && (
+                  <div className="flex items-center gap-3 shrink-0">
+                    {comparisonRows.map((row, index) => (
+                      <div key={row.region.id} className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm"
+                          style={{ background: REGION_COLORS[index] }}
+                        />
+                        <span
+                          className="text-[11px] font-bold"
+                          style={{ color: REGION_COLORS[index] }}
+                        >
+                          {row.region.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded shrink-0">
                 Percentile rank
               </span>
             </div>
@@ -309,7 +341,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                     <ResponsiveContainer width="100%" height="100%">
                       <RadarChart data={nationwideRadarData} outerRadius="68%">
                         <PolarGrid stroke="#e5e7eb" />
-                        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
+                        <PolarAngleAxis dataKey="metric" tick={renderAngleAxisTick} />
                         <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
                         {comparisonRows.map((row, index) => (
                           <Radar
@@ -322,10 +354,9 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                             strokeWidth={2}
                           />
                         ))}
-                        <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} />
                         <Tooltip
                           contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
-                          formatter={(value: number) => [`${value}점`, "전국 percentile"]}
+                          formatter={(value: number, name: string) => [`${value}점`, name]}
                         />
                       </RadarChart>
                     </ResponsiveContainer>
@@ -335,15 +366,13 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                 </div>
               </div>
               <div className="flex flex-col min-h-0">
-                <p className="text-[11px] font-bold text-gray-500 mb-1">
-                  {getPeerScopeLabel(peerScope)}
-                </p>
+                <p className="text-[11px] font-bold text-gray-500 mb-1">{getPeerScopeLabel(peerScope)}</p>
                 <div className="flex-1 min-h-0">
                   {hasRegions && peerScope ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <RadarChart data={peerRadarData} outerRadius="68%">
                         <PolarGrid stroke="#e5e7eb" />
-                        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
+                        <PolarAngleAxis dataKey="metric" tick={renderAngleAxisTick} />
                         <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
                         {comparisonRows.map((row, index) => (
                           <Radar
@@ -358,7 +387,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                         ))}
                         <Tooltip
                           contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
-                          formatter={(value: number) => [`${value}점`, "권역 percentile"]}
+                          formatter={(value: number, name: string) => [`${value}점`, name]}
                         />
                       </RadarChart>
                     </ResponsiveContainer>
