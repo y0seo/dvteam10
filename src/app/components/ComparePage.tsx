@@ -22,8 +22,11 @@ import {
   buildComparisonRows,
   comparisonMetricKeys,
   type CompareRegion,
+  getNationwidePercentile,
+  getPeerPercentile,
+  getPeerScope,
+  getPeerScopeLabel,
   type MetricKey,
-  normalizeMetric,
 } from "../data/comparisonData";
 
 const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
@@ -83,22 +86,34 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
 
   const comparisonRows = useMemo(() => buildComparisonRows(regions), [regions]);
 
-  const radarData = useMemo(
+  const peerScope = useMemo(() => getPeerScope(regions), [regions]);
+
+  const nationwideRadarData = useMemo(
     () =>
       comparisonMetricKeys.map((key) => {
-        const values = comparisonRows.map((row) => row.metrics[key].value);
         const row: Record<string, number | string> = {
           metric: comparisonRows[0]?.metrics[key].shortLabel || key,
         };
-
         comparisonRows.forEach((item, index) => {
-          row[`region${index}`] = normalizeMetric(item.metrics[key].value, values);
+          row[`region${index}`] = getNationwidePercentile(key, item.metrics[key].value);
         });
-
         return row;
       }),
     [comparisonRows],
   );
+
+  const peerRadarData = useMemo(() => {
+    if (!peerScope) return [];
+    return comparisonMetricKeys.map((key) => {
+      const row: Record<string, number | string> = {
+        metric: comparisonRows[0]?.metrics[key].shortLabel || key,
+      };
+      comparisonRows.forEach((item, index) => {
+        row[`region${index}`] = getPeerPercentile(key, item.metrics[key].value, peerScope);
+      });
+      return row;
+    });
+  }, [comparisonRows, peerScope]);
 
   const scatterData = useMemo(
     () =>
@@ -278,42 +293,86 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           })}
         </section>
 
-        <section className="grid grid-cols-[1.25fr_0.75fr] gap-4 flex-1 min-h-[420px]">
+        <section className="grid grid-cols-[1.5fr_0.8fr] gap-4 min-h-[360px]">
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-5 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-gray-800">정규화 레이더 비교</h3>
               <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                0-100 스케일
+                Percentile rank
               </span>
             </div>
-            <div className="flex-1 min-h-0">
-              {hasRegions ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={radarData} outerRadius="72%">
-                    <PolarGrid stroke="#e5e7eb" />
-                    <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
-                    <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
-                    {comparisonRows.map((row, index) => (
-                      <Radar
-                        key={row.region.id}
-                        dataKey={`region${index}`}
-                        name={row.region.name}
-                        stroke={REGION_COLORS[index]}
-                        fill={REGION_COLORS[index]}
-                        fillOpacity={0.18}
-                        strokeWidth={2}
-                      />
-                    ))}
-                    <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
-                      formatter={(value: number) => [`${value}점`, "정규화 값"]}
+            <div className="flex-1 min-h-0 grid grid-cols-2 gap-3">
+              <div className="flex flex-col min-h-0">
+                <p className="text-[11px] font-bold text-gray-500 mb-1">전국 대비</p>
+                <div className="flex-1 min-h-0">
+                  {hasRegions ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={nationwideRadarData} outerRadius="68%">
+                        <PolarGrid stroke="#e5e7eb" />
+                        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                        {comparisonRows.map((row, index) => (
+                          <Radar
+                            key={row.region.id}
+                            dataKey={`region${index}`}
+                            name={row.region.name}
+                            stroke={REGION_COLORS[index]}
+                            fill={REGION_COLORS[index]}
+                            fillOpacity={0.18}
+                            strokeWidth={2}
+                          />
+                        ))}
+                        <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} />
+                        <Tooltip
+                          contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
+                          formatter={(value: number) => [`${value}점`, "전국 percentile"]}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChartMessage text="선택된 지역이 없어 레이더 차트를 표시할 수 없습니다." />
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col min-h-0">
+                <p className="text-[11px] font-bold text-gray-500 mb-1">
+                  {getPeerScopeLabel(peerScope)}
+                </p>
+                <div className="flex-1 min-h-0">
+                  {hasRegions && peerScope ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={peerRadarData} outerRadius="68%">
+                        <PolarGrid stroke="#e5e7eb" />
+                        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                        {comparisonRows.map((row, index) => (
+                          <Radar
+                            key={row.region.id}
+                            dataKey={`region${index}`}
+                            name={row.region.name}
+                            stroke={REGION_COLORS[index]}
+                            fill={REGION_COLORS[index]}
+                            fillOpacity={0.18}
+                            strokeWidth={2}
+                          />
+                        ))}
+                        <Tooltip
+                          contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
+                          formatter={(value: number) => [`${value}점`, "권역 percentile"]}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChartMessage
+                      text={
+                        hasRegions
+                          ? "선택된 지역들이 서로 다른 권역에 있어 권역 내 비교를 표시할 수 없습니다."
+                          : "선택된 지역이 없어 레이더 차트를 표시할 수 없습니다."
+                      }
                     />
-                  </RadarChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyChartMessage text="선택된 지역이 없어 레이더 차트를 표시할 수 없습니다." />
-              )}
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
