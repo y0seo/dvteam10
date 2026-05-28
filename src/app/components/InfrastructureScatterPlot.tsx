@@ -1,6 +1,7 @@
 import {
   useMemo,
   useState,
+  useEffect,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -151,6 +152,10 @@ export function InfrastructureScatterPlot({
 }: InfrastructureScatterPlotProps) {
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
   const [clickedPointId, setClickedPointId] = useState<string | null>(null);
+  useEffect(() => {
+    setClickedPointId(null);
+  }, [selectedRegion, selectedSubRegion]);
+  
   const scatterData = useMemo(
     () => getScatterData(currentViewLevel),
     [currentViewLevel],
