@@ -252,9 +252,15 @@ export function MainPage() {
               setSelectedSubRegion(null);
               setSelectedSubRegionName(null); 
               setHoveredSubRegion(null);
-              setCurrentViewLevel(id);
             }}
             onRegionHover={setHoveredRegion}
+            onRegionDoubleClick={(id) => {
+              setSelectedRegion(id);
+              setSelectedSubRegion(null);
+              setSelectedSubRegionName(null); 
+              setHoveredSubRegion(null);
+              setCurrentViewLevel(id);
+            }}
             selectedRegion={selectedRegion}
             visitorData={visitorData}
             colorScaleMax={provinceVisitorScaleMax}
@@ -296,7 +302,7 @@ export function MainPage() {
                 {monthLabels.map((label, index) => (
                   <button
                     key={label}
-                    type="button"
+                    type="button"z
                     onClick={() => setSelectedMonthIndex(index)}
                     onMouseEnter={() => setHoveredMonthIndex(index)}
                     onMouseLeave={() => setHoveredMonthIndex(null)}
