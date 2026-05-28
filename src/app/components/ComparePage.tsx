@@ -88,7 +88,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
   const [isExiting, setIsExiting] = useState(false);
   const [xMetric, setXMetric] = useState<MetricKey>("landPrice");
   const [yMetric, setYMetric] = useState<MetricKey>("accommodationBusinesses");
-  const [sortMetric, setSortMetric] = useState<MetricKey | null>(null);
+  const [sortMetrics, setSortMetrics] = useState<Partial<Record<MetricKey, boolean>>>({});
 
   useEffect(() => {
     if (embedded || !shouldSlideIn) return;
@@ -237,7 +237,8 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           {comparisonMetricKeys.map((key) => {
             const Icon = metricIcons[key];
             const firstMetric = comparisonRows[0]?.metrics[key];
-            const metricRows = sortMetric === key
+            const isSortedDescending = Boolean(sortMetrics[key]);
+            const metricRows = isSortedDescending
               ? [...comparisonRows].sort((a, b) => {
                   const valueA = a.metrics[key].value ?? Number.NEGATIVE_INFINITY;
                   const valueB = b.metrics[key].value ?? Number.NEGATIVE_INFINITY;
@@ -253,14 +254,19 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                   </h3>
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => setSortMetric((prev) => (prev === key ? null : key))}
+                      onClick={() =>
+                        setSortMetrics((prev) => ({
+                          ...prev,
+                          [key]: !prev[key],
+                        }))
+                      }
                       className={`h-7 px-2 rounded-lg border text-[10px] font-bold transition-colors flex items-center gap-1 ${
-                        sortMetric === key
+                        isSortedDescending
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "bg-gray-50 border-gray-200 text-gray-500 hover:border-blue-400 hover:text-blue-600"
                       }`}
-                      aria-pressed={sortMetric === key}
-                      title={sortMetric === key ? "정렬 해제" : "내림차순 정렬"}
+                      aria-pressed={isSortedDescending}
+                      title={isSortedDescending ? "정렬 해제" : "내림차순 정렬"}
                     >
                       <ArrowDownWideNarrow className="w-3.5 h-3.5" />
                       내림차순
