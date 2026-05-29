@@ -2,6 +2,7 @@ import {
   useMemo,
   useState,
   useEffect,
+  useRef,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -25,6 +26,9 @@ import {
 } from "../data/accommodationAdjusted";
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
 import { HEATMAP_PALETTE } from "../data/heatmapPalette";
+
+import { getHeatmapColor } from "../data/heatmapPalette";
+import { getProvinceVisitorTotals, getDistrictVisitorTotals, getProvinceVisitorScaleMax, getDistrictVisitorScaleMax } from "../data/visitorData";
 
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
@@ -72,7 +76,7 @@ function HighlightedScatterPoint({
   const radius = isSelected || isHovered ? 7 : 5;
   const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#ffffff";
   const strokeWidth = isSelected || isHovered ? 3 : 1.5;
-  const pointFill = isSelected ? "#fed7aa" : isHovered ? "#fbcfe8" : fill;
+  const pointFill = fill;
 
   const handlePin = (
     event: ReactMouseEvent<SVGGElement> | ReactPointerEvent<SVGGElement>,
@@ -109,7 +113,9 @@ function HighlightedScatterPoint({
           opacity={0.95}
         />
       )}
+      {/* 💡 원본 인자를 건드리지 않기 위해 클래스명을 주어 상위에서 엘리먼트 위치를 추적할 수 있도록 연동 마킹 */}
       <circle
+        className={`scatter-dot-${payload?.id}`}
         cx={cx}
         cy={cy}
         r={radius}
@@ -152,6 +158,10 @@ export function InfrastructureScatterPlot({
 }: InfrastructureScatterPlotProps) {
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
   const [clickedPointId, setClickedPointId] = useState<string | null>(null);
+  
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
   useEffect(() => {
     setClickedPointId(null);
   }, [selectedRegion, selectedSubRegion]);
@@ -171,7 +181,29 @@ export function InfrastructureScatterPlot({
       ) ?? null,
     [scatterData, selectedSubRegion, selectedSubRegionName],
   );
-  const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint;
+
+  const mapHoveredPoint = useMemo(
+    () => scatterData.find((entry) => entry.id === hoveredSubRegion) ?? null,
+    [hoveredSubRegion, scatterData],
+  );
+
+  const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint ?? mapHoveredPoint;
+
+  useEffect(() => {
+    if (!activePiePoint) return;
+    const timer = setTimeout(() => {
+      const dotElement = document.querySelector(`.scatter-dot-${activePiePoint.id}`);
+      if (dotElement) {
+        const cx = Number(dotElement.getAttribute("cx"));
+        const cy = Number(dotElement.getAttribute("cy"));
+        if (!isNaN(cx) && !isNaN(cy)) {
+          setMousePos({ x: cx + 15, y: cy + 15 });
+        }
+      }
+    }, 16);
+    return () => clearTimeout(timer);
+  }, [activePiePoint]);
+
   const highlightedScatterData = useMemo(
     () =>
       scatterData.map((entry) => {
@@ -250,6 +282,43 @@ export function InfrastructureScatterPlot({
     onDataPointClick?.(item);
   };
 
+  const visitorData = useMemo(() => {
+    const defaultMonth = 1;
+    
+    return currentViewLevel === "national" 
+      ? getProvinceVisitorTotals(defaultMonth)
+      : getDistrictVisitorTotals(currentViewLevel, defaultMonth);
+  }, [currentViewLevel]);
+
+  const colorScaleMax = useMemo(() => {
+    if (!visitorData) return 1;
+    const values = Object.values(visitorData).map(v => Number(v) || 0);
+    return values.length > 0 ? Math.max(...values) : 1;
+  }, [visitorData]);
+
+  const computedColorScaleMax = useMemo(() => {
+    if (!visitorData) return 1;
+    const values = Object.values(visitorData).map(v => Number(v) || 0);
+    return values.length > 0 ? Math.max(...values) : 1;
+  }, [visitorData]);
+
+  const autoPositionStyle = useMemo(() => {
+    if (!containerRef.current) return { left: `${mousePos.x}px`, top: `${mousePos.y}px` };
+    const w = containerRef.current.clientWidth;
+    const h = containerRef.current.clientHeight;
+
+    let posX = mousePos.x;
+    let posY = mousePos.y;
+
+    if (posX + 270 > w) posX = mousePos.x - 30 - 270;
+    if (posX < 10) posX = 10;
+
+    if (posY + 266 > h) posY = mousePos.y - 30 - 266;
+    if (posY < 10) posY = 10;
+
+    return { left: `${posX}px`, top: `${posY}px` };
+  }, [mousePos, activePiePoint]);
+
   return (
     <div className="relative w-full h-full bg-white rounded-xl shadow-lg p-6 border-[0.5px] border-gray-200 flex flex-col min-h-0">
       <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
@@ -257,7 +326,8 @@ export function InfrastructureScatterPlot({
       </h3>
 
       <div
-        className="flex-1 min-h-0"
+        ref={containerRef}
+        className="flex-1 min-h-0 relative"
         onMouseMove={handleChartMouseMove}
         onMouseLeave={() => {
           setHoveredPoint(null);
@@ -308,15 +378,28 @@ export function InfrastructureScatterPlot({
               }
               cursor={onDataPointClick ? "pointer" : "default"}
             >
-              {highlightedScatterData.map((entry) => (
-                <Cell key={entry.id} fill={HEATMAP_PALETTE[4]} />
-              ))}
+              {highlightedScatterData.map((entry) => {
+                const visitors = visitorData ? (visitorData[entry.id] || visitorData[entry.name] || 0) : 0;
+                let cellColor = getHeatmapColor(visitors, colorScaleMax || 1);
+
+                return (
+                  <Cell 
+                    key={entry.id} 
+                    fill={cellColor} 
+                    stroke={activePiePoint?.id === entry.id ? "#000" : "#ffffff"} 
+                    strokeWidth={activePiePoint?.id === entry.id ? 1.5 : 0.5}
+                  />
+                );
+              })}
             </Scatter>
           </ScatterChart>
         </ResponsiveContainer>
 
         {activePiePoint && (
-          <div className="pointer-events-none absolute right-0 top-0 z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
+          <div 
+            className="pointer-events-none absolute z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col transition-all duration-150 ease-out"
+            style={autoPositionStyle}
+          >
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
                 <p className="text-xs font-bold text-gray-800 truncate">{activePiePoint.name}</p>
