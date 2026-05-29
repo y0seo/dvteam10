@@ -208,7 +208,10 @@ export function InfrastructureScatterPlot({
   );
 
   const pieData = useMemo(
-    () => getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null),
+    () => {
+      const data = getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null);
+      return [...data].sort((a, b) => b.value - a.value);
+    },
     [currentViewLevel, activePiePoint],
   );
 
@@ -352,6 +355,9 @@ export function InfrastructureScatterPlot({
                       paddingAngle={2}
                       stroke="#ffffff"
                       strokeWidth={2}
+                      startAngle={90}
+                      endAngle={-270}
+                      animationDuration={300}
                     >
                       {pieData.map((entry, index) => (
                         <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />

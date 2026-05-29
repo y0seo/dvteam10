@@ -116,7 +116,10 @@ export function MainPage() {
   }, [activeDisplayRegion, currentViewLevel, selectedSubRegion, selectedSubRegionName, selectedMonth, visitorData, subRegionVisitorData]);
 
   const companionPieData = useMemo(
-    () => (highlightedCountry ? getCompanionAverageByCountry(highlightedCountry) : []),
+    () => {
+      const data = (highlightedCountry ? getCompanionAverageByCountry(highlightedCountry) : []);
+      return [...data].sort((a, b) => b.value - a.value);
+    },
     [highlightedCountry, selectedMonth],
   );
 
@@ -434,6 +437,9 @@ export function MainPage() {
                         paddingAngle={2}
                         stroke="#ffffff"
                         strokeWidth={2}
+                        startAngle={90}
+                        endAngle={-270}
+                        animationDuration={300}
                       >
                         {companionPieData.map((entry: CompanionDatum) => (
                           <Cell key={entry.name} fill={COMPANION_COLORS[entry.name]} />
