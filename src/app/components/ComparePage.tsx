@@ -22,8 +22,11 @@ import {
   buildComparisonRows,
   comparisonMetricKeys,
   type CompareRegion,
+  getNationwidePercentile,
+  getPeerPercentile,
+  getPeerScope,
+  getPeerScopeLabel,
   type MetricKey,
-  normalizeMetric,
 } from "../data/comparisonData";
 
 const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
@@ -64,6 +67,18 @@ function formatAxis(value: number) {
   return value.toLocaleString();
 }
 
+function renderAngleAxisTick(props: { x: number; y: number; payload: { value: string }; textAnchor?: string }) {
+  const { x, y, payload, textAnchor } = props;
+  let dy = 0;
+  if (payload.value === "방문자") dy = -8;
+  else if (payload.value === "숙박업소") dy = 8;
+  return (
+    <text x={x} y={y + dy} textAnchor={textAnchor} fontSize={11} fontWeight={700} fill="#374151">
+      {payload.value}
+    </text>
+  );
+}
+
 export function ComparePage({ regionsOverride, embedded = false, onClose }: ComparePageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -73,7 +88,7 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
   const [isExiting, setIsExiting] = useState(false);
   const [xMetric, setXMetric] = useState<MetricKey>("landPrice");
   const [yMetric, setYMetric] = useState<MetricKey>("accommodationBusinesses");
-  const [sortMetric, setSortMetric] = useState<MetricKey | null>(null);
+  const [sortMetrics, setSortMetrics] = useState<Partial<Record<MetricKey, boolean>>>({});
 
   useEffect(() => {
     if (embedded || !shouldSlideIn) return;
@@ -83,22 +98,34 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
 
   const comparisonRows = useMemo(() => buildComparisonRows(regions), [regions]);
 
-  const radarData = useMemo(
+  const peerScope = useMemo(() => getPeerScope(regions), [regions]);
+
+  const nationwideRadarData = useMemo(
     () =>
       comparisonMetricKeys.map((key) => {
-        const values = comparisonRows.map((row) => row.metrics[key].value);
         const row: Record<string, number | string> = {
           metric: comparisonRows[0]?.metrics[key].shortLabel || key,
         };
-
         comparisonRows.forEach((item, index) => {
-          row[`region${index}`] = normalizeMetric(item.metrics[key].value, values);
+          row[`region${index}`] = getNationwidePercentile(key, item.metrics[key].value);
         });
-
         return row;
       }),
     [comparisonRows],
   );
+
+  const peerRadarData = useMemo(() => {
+    if (!peerScope) return [];
+    return comparisonMetricKeys.map((key) => {
+      const row: Record<string, number | string> = {
+        metric: comparisonRows[0]?.metrics[key].shortLabel || key,
+      };
+      comparisonRows.forEach((item, index) => {
+        row[`region${index}`] = getPeerPercentile(key, item.metrics[key].value, peerScope);
+      });
+      return row;
+    });
+  }, [comparisonRows, peerScope]);
 
   const scatterData = useMemo(
     () =>
@@ -210,7 +237,8 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           {comparisonMetricKeys.map((key) => {
             const Icon = metricIcons[key];
             const firstMetric = comparisonRows[0]?.metrics[key];
-            const metricRows = sortMetric === key
+            const isSortedDescending = Boolean(sortMetrics[key]);
+            const metricRows = isSortedDescending
               ? [...comparisonRows].sort((a, b) => {
                   const valueA = a.metrics[key].value ?? Number.NEGATIVE_INFINITY;
                   const valueB = b.metrics[key].value ?? Number.NEGATIVE_INFINITY;
@@ -226,14 +254,19 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
                   </h3>
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => setSortMetric((prev) => (prev === key ? null : key))}
+                      onClick={() =>
+                        setSortMetrics((prev) => ({
+                          ...prev,
+                          [key]: !prev[key],
+                        }))
+                      }
                       className={`h-7 px-2 rounded-lg border text-[10px] font-bold transition-colors flex items-center gap-1 ${
-                        sortMetric === key
+                        isSortedDescending
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "bg-gray-50 border-gray-200 text-gray-500 hover:border-blue-400 hover:text-blue-600"
                       }`}
-                      aria-pressed={sortMetric === key}
-                      title={sortMetric === key ? "정렬 해제" : "내림차순 정렬"}
+                      aria-pressed={isSortedDescending}
+                      title={isSortedDescending ? "정렬 해제" : "내림차순 정렬"}
                     >
                       <ArrowDownWideNarrow className="w-3.5 h-3.5" />
                       내림차순
@@ -278,42 +311,103 @@ export function ComparePage({ regionsOverride, embedded = false, onClose }: Comp
           })}
         </section>
 
-        <section className="grid grid-cols-[1.25fr_0.75fr] gap-4 flex-1 min-h-[420px]">
+        <section className="grid grid-cols-[1.5fr_0.8fr] gap-4 min-h-[360px]">
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-5 flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-800">정규화 레이더 비교</h3>
-              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                0-100 스케일
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <h3 className="text-sm font-bold text-gray-800 shrink-0">정규화 레이더 비교</h3>
+                {hasRegions && (
+                  <div className="flex items-center gap-3 shrink-0">
+                    {comparisonRows.map((row, index) => (
+                      <div key={row.region.id} className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm"
+                          style={{ background: REGION_COLORS[index] }}
+                        />
+                        <span
+                          className="text-[11px] font-bold"
+                          style={{ color: REGION_COLORS[index] }}
+                        >
+                          {row.region.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded shrink-0">
+                Percentile rank
               </span>
             </div>
-            <div className="flex-1 min-h-0">
-              {hasRegions ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={radarData} outerRadius="72%">
-                    <PolarGrid stroke="#e5e7eb" />
-                    <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fontWeight: 700 }} />
-                    <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
-                    {comparisonRows.map((row, index) => (
-                      <Radar
-                        key={row.region.id}
-                        dataKey={`region${index}`}
-                        name={row.region.name}
-                        stroke={REGION_COLORS[index]}
-                        fill={REGION_COLORS[index]}
-                        fillOpacity={0.18}
-                        strokeWidth={2}
-                      />
-                    ))}
-                    <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
-                      formatter={(value: number) => [`${value}점`, "정규화 값"]}
+            <div className="flex-1 min-h-0 grid grid-cols-2 gap-3">
+              <div className="flex flex-col min-h-0">
+                <p className="text-[11px] font-bold text-gray-500 mb-1">전국 대비</p>
+                <div className="flex-1 min-h-0">
+                  {hasRegions ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={nationwideRadarData} outerRadius="68%">
+                        <PolarGrid stroke="#e5e7eb" />
+                        <PolarAngleAxis dataKey="metric" tick={renderAngleAxisTick} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                        {comparisonRows.map((row, index) => (
+                          <Radar
+                            key={row.region.id}
+                            dataKey={`region${index}`}
+                            name={row.region.name}
+                            stroke={REGION_COLORS[index]}
+                            fill={REGION_COLORS[index]}
+                            fillOpacity={0.18}
+                            strokeWidth={2}
+                          />
+                        ))}
+                        <Tooltip
+                          contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
+                          formatter={(value: number, name: string) => [`${value}점`, name]}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChartMessage text="선택된 지역이 없어 레이더 차트를 표시할 수 없습니다." />
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col min-h-0">
+                <p className="text-[11px] font-bold text-gray-500 mb-1">{getPeerScopeLabel(peerScope)}</p>
+                <div className="flex-1 min-h-0">
+                  {hasRegions && peerScope ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart data={peerRadarData} outerRadius="68%">
+                        <PolarGrid stroke="#e5e7eb" />
+                        <PolarAngleAxis dataKey="metric" tick={renderAngleAxisTick} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
+                        {comparisonRows.map((row, index) => (
+                          <Radar
+                            key={row.region.id}
+                            dataKey={`region${index}`}
+                            name={row.region.name}
+                            stroke={REGION_COLORS[index]}
+                            fill={REGION_COLORS[index]}
+                            fillOpacity={0.18}
+                            strokeWidth={2}
+                          />
+                        ))}
+                        <Tooltip
+                          contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
+                          formatter={(value: number, name: string) => [`${value}점`, name]}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChartMessage
+                      text={
+                        hasRegions
+                          ? "선택된 지역들이 서로 다른 권역에 있어 권역 내 비교를 표시할 수 없습니다."
+                          : "선택된 지역이 없어 레이더 차트를 표시할 수 없습니다."
+                      }
                     />
-                  </RadarChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyChartMessage text="선택된 지역이 없어 레이더 차트를 표시할 수 없습니다." />
-              )}
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -464,6 +558,7 @@ function ScatterMetricShape({ cx = 0, cy = 0, fill = "#2563eb", payload, metricK
         <circle cx="12" cy="12" r="10" fill={color} stroke={strokeColor} strokeWidth="2" />
         <path
           d="M12 5.5v13M8.3 9c.5-1.3 1.8-2.1 3.6-2.1 2 0 3.4.9 3.4 2.4 0 1.7-1.7 2.2-3.5 2.7-1.9.5-3.6 1.1-3.6 2.9 0 1.6 1.5 2.6 3.7 2.6 2 0 3.5-.8 4-2.2"
+          transform="translate(24 0) scale(-1 1)"
           fill="none"
           stroke={strokeColor}
           strokeLinecap="round"

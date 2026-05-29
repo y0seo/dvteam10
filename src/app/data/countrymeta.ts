@@ -39,7 +39,7 @@ export const COUNTRY_META: Record<string, CountryMeta> = {
   "미국": { continent: "북미", countryCode: "us" },
   "캐나다": { continent: "북미", countryCode: "ca" },
   "멕시코": { continent: "북미", countryCode: "mx" },
-  "오스트레일리아": { continent: "오세아니아", countryCode: "au" },
+  "호주": { continent: "오세아니아", countryCode: "au" },
   "기타": { continent: "기타", countryCode: "" }, 
 };
 

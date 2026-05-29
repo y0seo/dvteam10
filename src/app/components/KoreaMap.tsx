@@ -9,7 +9,8 @@ import {
 
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
-  onRegionHover: (region: string | null) => void; 
+  onRegionHover: (region: string | null) => void;
+  onRegionDoubleClick: (region: string) => void; 
   selectedRegion: string | null;
   visitorData: { [key: string]: number };
   colorScaleMax: number;
@@ -27,7 +28,7 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
@@ -44,16 +45,21 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
 
   
   useEffect(() => {
-    if (!selectedRegion || !mapContainerRef.current) return;
-
+    if (!mapContainerRef.current) return;
     const svgElement = mapContainerRef.current.querySelector("svg");
-    if (svgElement) {
-      const regionElement = svgElement.querySelector(`#${selectedRegion}`);
+    if (!svgElement) return;
+
+    const bringToFront = (id: string) => {
+      const regionElement = svgElement.querySelector(`#${id}`);
       if (regionElement && regionElement.parentNode) {
-        svgElement.appendChild(regionElement); 
+        regionElement.parentNode.appendChild(regionElement);
       }
-    }
-  }, [selectedRegion, svgContent]);
+    };
+
+    if (selectedRegion) bringToFront(selectedRegion);
+    if (hoveredRegion) bringToFront(hoveredRegion);
+
+  }, [selectedRegion, hoveredRegion, svgContent]);
 
   
   const dynamicStyles = useMemo(() => {
@@ -94,21 +100,18 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
   const validIds = regionsInfo.map(r => r.id);
 
   
-  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover") => {
+  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover" | "doubleclick") => {
     const target = e.target as SVGElement;
     const regionElement = target.id ? target : (target.closest('g') || target.closest('path'));
     const regionId = regionElement?.id;
     
     if (regionId && validIds.includes(regionId)) {
-      if (type === "hover" && regionElement && regionElement.parentNode) {
-        regionElement.parentNode.appendChild(regionElement);
-      }
-
       if (type === "click") onRegionClick(regionId);
       if (type === "hover") {
         setHoveredRegion(regionId);
         onRegionHover(regionId);
       }
+      if (type === "doubleclick") onRegionDoubleClick(regionId);
     } else if (type === "hover") {
       setHoveredRegion(null);
       onRegionHover(null);
@@ -144,6 +147,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, visitor
           setHoveredRegion(null);
           onRegionHover(null);
         }}
+        onDoubleClick={(e) => handleInteraction(e, "doubleclick")}
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 

@@ -2,8 +2,10 @@ import accommodationCsvRaw from "../../data/accommodation_status.csv?raw";
 import lodgingSpendingCsvRaw from "../../data/lodging_spending.csv?raw";
 import realEstateCsvRaw from "../../data/real_estate_price.csv?raw";
 import {
+  getAllDistrictVisitorTotals,
   getRegionMonthlyVisitorTrend,
   getRegionVisitorTotal,
+  provinceCsvNameToId,
   provinceIdToCsvName,
 } from "./visitorData";
 
@@ -185,21 +187,160 @@ export function buildComparisonRows(regions: CompareRegion[]): RegionComparisonR
   });
 }
 
-export function normalizeMetric(value: number | null, values: (number | null)[]) {
-  if (value == null) return 0;
-  const validValues = values.filter((v): v is number => v != null);
-  if (validValues.length === 0) return 0;
-
-  const min = Math.min(...validValues);
-  const max = Math.max(...validValues);
-  if (max === min) return 75;
-
-  return Math.round(((value - min) / (max - min)) * 100);
-}
-
 export const comparisonMetricKeys: MetricKey[] = [
   "foreignVisitors",
   "accommodationSpending",
   "accommodationBusinesses",
   "landPrice",
 ];
+
+// --- 정규화: 전국 시군구 분포 기반 percentile rank ---
+
+export type RegionGroup =
+  | "metropolitan"
+  | "gangwon"
+  | "chungcheong"
+  | "honam"
+  | "yeongnam"
+  | "jeju";
+
+const provinceIdToGroup: Record<string, RegionGroup> = {
+  seoul: "metropolitan",
+  incheon: "metropolitan",
+  gyeonggi: "metropolitan",
+  gangwon: "gangwon",
+  chungbuk: "chungcheong",
+  chungnam: "chungcheong",
+  sejong: "chungcheong",
+  daejeon: "chungcheong",
+  jeonbuk: "honam",
+  jeonnam: "honam",
+  gwangju: "honam",
+  busan: "yeongnam",
+  daegu: "yeongnam",
+  ulsan: "yeongnam",
+  gyeongbuk: "yeongnam",
+  gyeongnam: "yeongnam",
+  jeju: "jeju",
+};
+
+const regionGroupLabel: Record<RegionGroup, string> = {
+  metropolitan: "수도권",
+  gangwon: "강원",
+  chungcheong: "충청",
+  honam: "호남",
+  yeongnam: "영남",
+  jeju: "제주",
+};
+
+type DistrictMetricRow = { provinceName: string; district: string; value: number };
+
+const distributionCache: Partial<Record<MetricKey, DistrictMetricRow[]>> = {};
+
+function buildMetricDistribution(metric: MetricKey): DistrictMetricRow[] {
+  switch (metric) {
+    case "foreignVisitors":
+      return getAllDistrictVisitorTotals().map((row) => ({
+        provinceName: row.provinceName,
+        district: row.districtName,
+        value: row.total,
+      }));
+    case "accommodationBusinesses":
+      return accommodationRows
+        .filter((row) => row.district && row.district !== "-" && row.total > 0)
+        .map((row) => ({ provinceName: row.province, district: row.district, value: row.total }));
+    case "landPrice":
+      return landPriceRows
+        .filter((row) => row.district && row.district !== "-" && row.price > 0)
+        .map((row) => ({ provinceName: row.province, district: row.district, value: row.price }));
+    case "accommodationSpending":
+      return lodgingSpendingRows
+        .filter((row) => row.year === "2025" && row.district && row.spending > 0)
+        .map((row) => ({
+          provinceName: row.province,
+          district: row.district,
+          value: row.spending,
+        }));
+  }
+}
+
+function getDistribution(metric: MetricKey): DistrictMetricRow[] {
+  if (!distributionCache[metric]) {
+    distributionCache[metric] = buildMetricDistribution(metric);
+  }
+  return distributionCache[metric]!;
+}
+
+function percentileRank(value: number | null, values: number[]): number {
+  if (value == null || values.length === 0) return 0;
+  let below = 0;
+  let equal = 0;
+  for (const v of values) {
+    if (v < value) below++;
+    else if (v === value) equal++;
+  }
+  return Math.round(((below + 0.5 * equal) / values.length) * 100);
+}
+
+export function getNationwidePercentile(metric: MetricKey, value: number | null): number {
+  if (value == null) return 0;
+  return percentileRank(
+    value,
+    getDistribution(metric).map((row) => row.value),
+  );
+}
+
+export type PeerScope =
+  | { type: "province"; provinceName: string }
+  | { type: "group"; group: RegionGroup };
+
+export function getPeerScope(regions: CompareRegion[]): PeerScope | null {
+  if (regions.length === 0) return null;
+  const provinceNames = regions
+    .map((r) => provinceIdToCsvName[r.provinceId])
+    .filter((p): p is string => Boolean(p));
+  if (provinceNames.length === 0) return null;
+
+  const allSameProvince = provinceNames.every((p) => p === provinceNames[0]);
+  if (allSameProvince) {
+    return { type: "province", provinceName: provinceNames[0] };
+  }
+
+  const groups = regions
+    .map((r) => provinceIdToGroup[r.provinceId])
+    .filter((g): g is RegionGroup => Boolean(g));
+  if (groups.length === 0) return null;
+
+  const allSameGroup = groups.every((g) => g === groups[0]);
+  if (allSameGroup) {
+    return { type: "group", group: groups[0] };
+  }
+  return null;
+}
+
+export function getPeerScopeLabel(scope: PeerScope | null): string {
+  if (!scope) return "권역 비교 불가";
+  if (scope.type === "province") return `${scope.provinceName} 내`;
+  return `${regionGroupLabel[scope.group]} 권역 내`;
+}
+
+export function getPeerPercentile(
+  metric: MetricKey,
+  value: number | null,
+  scope: PeerScope,
+): number {
+  if (value == null) return 0;
+  const distribution = getDistribution(metric);
+  const peerValues =
+    scope.type === "province"
+      ? distribution
+          .filter((row) => row.provinceName === scope.provinceName)
+          .map((row) => row.value)
+      : distribution
+          .filter((row) => {
+            const provinceId = provinceCsvNameToId[row.provinceName];
+            return provinceId && provinceIdToGroup[provinceId] === scope.group;
+          })
+          .map((row) => row.value);
+  return percentileRank(value, peerValues);
+}
