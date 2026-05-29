@@ -28,7 +28,7 @@ export const provinceIdToCsvName: Record<string, string> = {
   jeju: "제주특별자치도",
 };
 
-const provinceCsvNameToId = Object.fromEntries(
+export const provinceCsvNameToId = Object.fromEntries(
   Object.entries(provinceIdToCsvName).map(([id, name]) => [name, id]),
 ) as Record<string, string>;
 
@@ -191,6 +191,32 @@ export function getRegionMonthlyVisitorTrend(
   return Object.entries(totals)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, visitors]) => ({ month, visitors }));
+}
+
+export function getAllDistrictVisitorTotals(
+  startMonth = "2023-01",
+  endMonth = "2025-12",
+): { provinceName: string; districtName: string; total: number }[] {
+  const totalsMap = new Map<
+    string,
+    { provinceName: string; districtName: string; total: number }
+  >();
+  for (const row of visitorRows) {
+    if (!row.districtName) continue;
+    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
+    const key = `${row.provinceName}|${row.districtName}`;
+    const existing = totalsMap.get(key);
+    if (existing) {
+      existing.total += row.districtVisitors;
+    } else {
+      totalsMap.set(key, {
+        provinceName: row.provinceName,
+        districtName: row.districtName,
+        total: row.districtVisitors,
+      });
+    }
+  }
+  return Array.from(totalsMap.values()).filter((row) => row.total > 0);
 }
 
 export function getProvinceVisitorScaleMax() {

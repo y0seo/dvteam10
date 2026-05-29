@@ -1,7 +1,7 @@
 
   # InnSight
 
-  This is a code bundle for Visualizing Inbound Torism Trends in South Korea. 
+  This is a code bundle for Visualizing Inbound Tourism Trends in South Korea. 
 
   ## Running the code
 

@@ -1,4 +1,11 @@
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   CartesianGrid,
   Cell,
@@ -20,16 +27,105 @@ import {
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
 import { HEATMAP_PALETTE } from "../data/heatmapPalette";
 
+import { getHeatmapColor } from "../data/heatmapPalette";
+import { getProvinceVisitorTotals, getDistrictVisitorTotals, getProvinceVisitorScaleMax, getDistrictVisitorScaleMax } from "../data/visitorData";
+
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
   selectedRegion: string;
   selectedSubRegion: string | null;
   selectedSubRegionName: string | null;
+  hoveredSubRegion?: string | null;
   regionsInfo: { id: string; name: string }[];
   onDataPointClick?: (item: ScatterDataItem) => void;
+  onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
 const PIE_COLORS = ["#2563eb", "#10b981", "#f97316", "#9ca3af"];
+const SELECTED_POINT_COLOR = "#ea580c";
+const HOVERED_POINT_COLOR = "#c17aab";
+
+type HighlightedScatterPointPayload = ScatterDataItem & {
+  highlightState?: "selected" | "hovered" | null;
+};
+
+interface HighlightedScatterPointProps {
+  cx?: number;
+  cy?: number;
+  fill?: string;
+  payload?: HighlightedScatterPointPayload;
+  cursor?: string;
+  onPointClick?: (item: ScatterDataItem) => void;
+  onPointHover?: (item: ScatterDataItem | null) => void;
+}
+
+function HighlightedScatterPoint({
+  cx,
+  cy,
+  fill,
+  payload,
+  cursor = "default",
+  onPointClick,
+  onPointHover,
+}: HighlightedScatterPointProps) {
+  if (typeof cx !== "number" || typeof cy !== "number") return null;
+
+  const highlightState = payload?.highlightState;
+  const isSelected = highlightState === "selected";
+  const isHovered = highlightState === "hovered";
+  const radius = isSelected || isHovered ? 7 : 5;
+  const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#ffffff";
+  const strokeWidth = isSelected || isHovered ? 3 : 1.5;
+  const pointFill = fill;
+
+  const handlePin = (
+    event: ReactMouseEvent<SVGGElement> | ReactPointerEvent<SVGGElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!payload) return;
+    onPointClick?.(payload);
+  };
+
+  return (
+    <g
+      cursor={cursor}
+      data-scatter-hit="true"
+      pointerEvents="all"
+      onPointerDown={handlePin}
+      onMouseEnter={() => {
+        if (!payload) return;
+        onPointHover?.(payload);
+      }}
+      onMouseLeave={() => {
+        onPointHover?.(null);
+      }}
+    >
+      <circle cx={cx} cy={cy} r={16} fill="#ffffff" opacity={0} pointerEvents="all" />
+      {(isSelected || isHovered) && (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius + 4}
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth={5}
+          opacity={0.95}
+        />
+      )}
+      {/* 💡 원본 인자를 건드리지 않기 위해 클래스명을 주어 상위에서 엘리먼트 위치를 추적할 수 있도록 연동 마킹 */}
+      <circle
+        className={`scatter-dot-${payload?.id}`}
+        cx={cx}
+        cy={cy}
+        r={radius}
+        fill={pointFill}
+        stroke={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    </g>
+  );
+}
 
 function PieTooltip({
   active,
@@ -55,18 +151,99 @@ export function InfrastructureScatterPlot({
   selectedRegion,
   selectedSubRegion,
   selectedSubRegionName,
+  hoveredSubRegion,
   regionsInfo,
   onDataPointClick,
+  onDataPointHover,
 }: InfrastructureScatterPlotProps) {
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
+  const [clickedPointId, setClickedPointId] = useState<string | null>(null);
+  
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    setClickedPointId(null);
+  }, [selectedRegion, selectedSubRegion]);
+  
   const scatterData = useMemo(
     () => getScatterData(currentViewLevel),
     [currentViewLevel],
   );
-  const activePiePoint = hoveredPoint;
+  const clickedPoint = useMemo(
+    () => scatterData.find((entry) => entry.id === clickedPointId) ?? null,
+    [clickedPointId, scatterData],
+  );
+  const selectedPoint = useMemo(
+    () =>
+      scatterData.find(
+        (entry) => selectedSubRegion === entry.id || selectedSubRegionName === entry.name,
+      ) ?? null,
+    [scatterData, selectedSubRegion, selectedSubRegionName],
+  );
+
+  const mapHoveredPoint = useMemo(
+    () => scatterData.find((entry) => entry.id === hoveredSubRegion) ?? null,
+    [hoveredSubRegion, scatterData],
+  );
+
+  const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint ?? mapHoveredPoint;
+
+  useEffect(() => {
+    if (!activePiePoint) return;
+    const timer = setTimeout(() => {
+      const dotElement = document.querySelector(`.scatter-dot-${activePiePoint.id}`);
+      if (dotElement) {
+        const cx = Number(dotElement.getAttribute("cx"));
+        const cy = Number(dotElement.getAttribute("cy"));
+        if (!isNaN(cx) && !isNaN(cy)) {
+          setMousePos({ x: cx + 15, y: cy + 15 });
+        }
+      }
+    }, 16);
+    return () => clearTimeout(timer);
+  }, [activePiePoint]);
+
+  const highlightedScatterData = useMemo(
+    () =>
+      scatterData.map((entry) => {
+        const isHovered =
+          currentViewLevel === "national"
+            ? hoveredPoint?.id === entry.id
+            : hoveredSubRegion === entry.id ||
+              hoveredPoint?.id === entry.id ||
+              hoveredPoint?.name === entry.name;
+        const isClicked =
+          currentViewLevel === "national"
+            ? clickedPointId === entry.id
+            : clickedPointId === entry.id;
+        const isSelected =
+          currentViewLevel === "national"
+            ? selectedRegion === entry.id
+            : selectedSubRegion === entry.id || selectedSubRegionName === entry.name;
+
+        return {
+          ...entry,
+          highlightState: isClicked || isSelected ? "selected" : isHovered ? "hovered" : null,
+        };
+      }),
+    [
+      clickedPointId,
+      currentViewLevel,
+      hoveredPoint,
+      hoveredSubRegion,
+      scatterData,
+      selectedRegion,
+      selectedSubRegion,
+      selectedSubRegionName,
+    ],
+  );
 
   const pieData = useMemo(
-    () => getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null),
+    () => {
+      const data = getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null);
+      return [...data].sort((a, b) => b.value - a.value);
+    },
     [currentViewLevel, activePiePoint],
   );
 
@@ -81,13 +258,82 @@ export function InfrastructureScatterPlot({
     [pieData],
   );
 
+  const handlePointHover = (item: ScatterDataItem | null) => {
+    setHoveredPoint(item);
+    onDataPointHover?.(item);
+  };
+
+  const handleChartMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("[data-scatter-hit='true']")) return;
+    if (!hoveredPoint) return;
+    handlePointHover(null);
+  };
+
+  const handlePointClick = (item: ScatterDataItem) => {
+    setClickedPointId((prevId) => {
+      if (prevId === item.id) {
+        handlePointHover(null);
+        return null;
+      }
+      return item.id;
+    });
+    onDataPointClick?.(item);
+  };
+
+  const visitorData = useMemo(() => {
+    const defaultMonth = 1;
+    
+    return currentViewLevel === "national" 
+      ? getProvinceVisitorTotals(defaultMonth)
+      : getDistrictVisitorTotals(currentViewLevel, defaultMonth);
+  }, [currentViewLevel]);
+
+  const colorScaleMax = useMemo(() => {
+    if (!visitorData) return 1;
+    const values = Object.values(visitorData).map(v => Number(v) || 0);
+    return values.length > 0 ? Math.max(...values) : 1;
+  }, [visitorData]);
+
+  const computedColorScaleMax = useMemo(() => {
+    if (!visitorData) return 1;
+    const values = Object.values(visitorData).map(v => Number(v) || 0);
+    return values.length > 0 ? Math.max(...values) : 1;
+  }, [visitorData]);
+
+  const autoPositionStyle = useMemo(() => {
+    if (!containerRef.current) return { left: `${mousePos.x}px`, top: `${mousePos.y}px` };
+    const w = containerRef.current.clientWidth;
+    const h = containerRef.current.clientHeight;
+
+    let posX = mousePos.x;
+    let posY = mousePos.y;
+
+    if (posX + 270 > w) posX = mousePos.x - 30 - 270;
+    if (posX < 10) posX = 10;
+
+    if (posY + 266 > h) posY = mousePos.y - 30 - 266;
+    if (posY < 10) posY = 10;
+
+    return { left: `${posX}px`, top: `${posY}px` };
+  }, [mousePos, activePiePoint]);
+
   return (
     <div className="relative w-full h-full bg-white rounded-xl shadow-lg p-6 border-[0.5px] border-gray-200 flex flex-col min-h-0">
       <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
         <span>지역별 지가 대비 숙박 인프라 현황 분석</span>
       </h3>
 
-      <div className="flex-1 min-h-0">
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 relative"
+        onMouseMove={handleChartMouseMove}
+        onMouseLeave={() => {
+          setHoveredPoint(null);
+          onDataPointHover?.(null);
+        }}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 14, right: 26, bottom: 22, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -122,30 +368,26 @@ export function InfrastructureScatterPlot({
             <ZAxis range={[80, 180]} />
             <Tooltip cursor={{ strokeDasharray: "3 3", stroke: "#cbd5e1" }} content={() => null} />
             <Scatter
-              data={scatterData}
-              shape="circle"
+              data={highlightedScatterData}
+              shape={
+                <HighlightedScatterPoint
+                  cursor={onDataPointClick ? "pointer" : "default"}
+                  onPointClick={handlePointClick}
+                  onPointHover={handlePointHover}
+                />
+              }
               cursor={onDataPointClick ? "pointer" : "default"}
-              onMouseEnter={(payload: { payload?: ScatterDataItem }) => {
-                if (payload.payload) setHoveredPoint(payload.payload);
-              }}
-              onMouseLeave={() => setHoveredPoint(null)}
-              onClick={(payload: { payload?: ScatterDataItem }) => {
-                if (!payload.payload) return;
-                onDataPointClick?.(payload.payload);
-              }}
             >
-              {scatterData.map((entry) => {
-                const isSelected =
-                  currentViewLevel === "national"
-                    ? selectedRegion === entry.id
-                    : selectedSubRegion === entry.id || selectedSubRegionName === entry.name;
+              {highlightedScatterData.map((entry) => {
+                const visitors = visitorData ? (visitorData[entry.id] || visitorData[entry.name] || 0) : 0;
+                let cellColor = getHeatmapColor(visitors, colorScaleMax || 1);
 
                 return (
-                  <Cell
-                    key={entry.id}
-                    fill={HEATMAP_PALETTE[4]}
-                    stroke={isSelected ? "#ea580c" : "none"}
-                    strokeWidth={isSelected ? 3 : 0}
+                  <Cell 
+                    key={entry.id} 
+                    fill={cellColor} 
+                    stroke={activePiePoint?.id === entry.id ? "#000" : "#ffffff"} 
+                    strokeWidth={activePiePoint?.id === entry.id ? 1.5 : 0.5}
                   />
                 );
               })}
@@ -154,11 +396,14 @@ export function InfrastructureScatterPlot({
         </ResponsiveContainer>
 
         {activePiePoint && (
-          <div className="absolute right-0 top-0 z-20 w-[270px] h-[286px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col">
+          <div 
+            className="pointer-events-none absolute z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col transition-all duration-150 ease-out"
+            style={autoPositionStyle}
+          >
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-800">숙박업소 현황</p>
-                <p className="text-[11px] text-gray-500 truncate">{activePiePoint.name}</p>
+                <p className="text-xs font-bold text-gray-800 truncate">{activePiePoint.name}</p>
+                <p className="text-[10px] font-semibold text-gray-400 mt-0.5">숙박업소 현황</p>
               </div>
               <span className="shrink-0 text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                 {pieTotal.toLocaleString()}개
@@ -188,11 +433,14 @@ export function InfrastructureScatterPlot({
                       data={pieData}
                       dataKey="value"
                       nameKey="name"
-                      innerRadius="45%"
-                      outerRadius="72%"
+                      innerRadius="57%"
+                      outerRadius="91%"
                       paddingAngle={2}
                       stroke="#ffffff"
                       strokeWidth={2}
+                      startAngle={90}
+                      endAngle={-270}
+                      animationDuration={300}
                     >
                       {pieData.map((entry, index) => (
                         <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
