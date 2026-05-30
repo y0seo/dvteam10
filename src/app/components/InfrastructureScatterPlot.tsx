@@ -4,14 +4,10 @@ import {
   useEffect,
   useRef,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   CartesianGrid,
   Cell,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -20,15 +16,10 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import {
-  getAccommodationAdjustedData,
-  type AccommodationAdjustedDatum,
-} from "../data/accommodationAdjusted";
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
-import { HEATMAP_PALETTE } from "../data/heatmapPalette";
-
 import { getHeatmapColor } from "../data/heatmapPalette";
-import { getProvinceVisitorTotals, getDistrictVisitorTotals, getProvinceVisitorScaleMax, getDistrictVisitorScaleMax } from "../data/visitorData";
+import { getDistrictVisitorTotals } from "../data/visitorData";
+import { getAccommodationSpending } from "../data/comparisonData";
 
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
@@ -41,17 +32,18 @@ interface InfrastructureScatterPlotProps {
   onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
-const PIE_COLORS = ["#2563eb", "#10b981", "#f97316", "#9ca3af"];
 const SELECTED_POINT_COLOR = "#ea580c";
 const HOVERED_POINT_COLOR = "#c17aab";
 
 type HighlightedScatterPointPayload = ScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
+  spending?: number;
 };
 
 interface HighlightedScatterPointProps {
   cx?: number;
   cy?: number;
+  size?: number;
   fill?: string;
   payload?: HighlightedScatterPointPayload;
   cursor?: string;
@@ -59,9 +51,63 @@ interface HighlightedScatterPointProps {
   onPointHover?: (item: ScatterDataItem | null) => void;
 }
 
+let cachedVisitorData: Record<string, number> | null = null;
+let cachedScatterData: (ScatterDataItem & { spending: number })[] = [];
+let cachedColorScaleMax = 1;
+let cachedMaxPrice = 1;
+let cachedMaxAccommodation = 1;
+let cachedMaxSpending = 1;
+
+function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[]) {
+  if (cachedVisitorData !== null) return;
+
+  const defaultMonth = 1;
+  const visitors: Record<string, number> = {};
+  let scatter: (ScatterDataItem & { spending: number })[] = [];
+
+  regionsInfo.forEach((region) => {
+    const data = getDistrictVisitorTotals(region.id, defaultMonth) || getDistrictVisitorTotals(region.id) || {};
+    Object.entries(data).forEach(([districtName, value]) => {
+      visitors[`${region.id}-${districtName}`] = value;
+    });
+
+    const scatterRaw = getScatterData(region.id) || [];
+    const mappedData = scatterRaw.map((item) => {
+      const actualSpending = getAccommodationSpending(region.id, item.name) || 0;
+      return {
+        ...item,
+        id: `${region.id}-${item.id}`,
+        spending: actualSpending, 
+      };
+    });
+    scatter = [...scatter, ...mappedData];
+  });
+
+  const values = Object.values(visitors)
+    .map((v) => Number(v) || 0)
+    .sort((a, b) => a - b);
+
+  let maxScale = 1;
+  if (values.length > 10) {
+    const trimmedValues = values.slice(5, -5); 
+    maxScale = Math.max(...trimmedValues, 1);
+  } else if (values.length > 0) {
+    maxScale = Math.max(...values, 1);
+  }
+
+  cachedMaxPrice = Math.ceil(Math.max(...scatter.map(s => s.price), 1) * 1.05);
+  cachedMaxAccommodation = Math.ceil(Math.max(...scatter.map(s => s.accommodation), 1) * 1.05);
+  cachedMaxSpending = Math.max(...scatter.map(s => s.spending), 1);
+
+  cachedVisitorData = visitors;
+  cachedScatterData = scatter;
+  cachedColorScaleMax = maxScale;
+}
+
 function HighlightedScatterPoint({
   cx,
   cy,
+  size,
   fill,
   payload,
   cursor = "default",
@@ -73,35 +119,31 @@ function HighlightedScatterPoint({
   const highlightState = payload?.highlightState;
   const isSelected = highlightState === "selected";
   const isHovered = highlightState === "hovered";
-  const radius = isSelected || isHovered ? 7 : 5;
+  
+  const baseRadius = size ? Math.sqrt(size) : 5;
+  const radius = isSelected || isHovered ? baseRadius + 3 : baseRadius; 
+  
   const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#ffffff";
   const strokeWidth = isSelected || isHovered ? 3 : 1.5;
-  const pointFill = fill;
-
-  const handlePin = (
-    event: ReactMouseEvent<SVGGElement> | ReactPointerEvent<SVGGElement>,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!payload) return;
-    onPointClick?.(payload);
-  };
 
   return (
     <g
       cursor={cursor}
       data-scatter-hit="true"
       pointerEvents="all"
-      onPointerDown={handlePin}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (payload) onPointClick?.(payload);
+      }}
       onMouseEnter={() => {
-        if (!payload) return;
-        onPointHover?.(payload);
+        if (payload) onPointHover?.(payload);
       }}
       onMouseLeave={() => {
         onPointHover?.(null);
       }}
     >
-      <circle cx={cx} cy={cy} r={16} fill="#ffffff" opacity={0} pointerEvents="all" />
+      <circle cx={cx} cy={cy} r={radius + 10} fill="#ffffff" opacity={0} pointerEvents="all" />
       {(isSelected || isHovered) && (
         <circle
           cx={cx}
@@ -113,13 +155,12 @@ function HighlightedScatterPoint({
           opacity={0.95}
         />
       )}
-      {/* 💡 원본 인자를 건드리지 않기 위해 클래스명을 주어 상위에서 엘리먼트 위치를 추적할 수 있도록 연동 마킹 */}
       <circle
         className={`scatter-dot-${payload?.id}`}
         cx={cx}
         cy={cy}
-        r={radius}
-        fill={pointFill}
+        r={radius} 
+        fill={fill}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
       />
@@ -127,35 +168,21 @@ function HighlightedScatterPoint({
   );
 }
 
-function PieTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload?: AccommodationAdjustedDatum; value?: number; name?: string }>;
-}) {
-  if (!active || !payload?.length) return null;
-  const item = payload[0];
-  const value = Number(item.value ?? item.payload?.value ?? 0);
-
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-xs">
-      <p className="font-bold text-gray-800">{item.name}</p>
-      <p className="text-gray-600">{value.toLocaleString()}개</p>
-    </div>
-  );
-}
-
 export function InfrastructureScatterPlot({
-  currentViewLevel,
   selectedRegion,
   selectedSubRegion,
-  selectedSubRegionName,
-  hoveredSubRegion,
   regionsInfo,
   onDataPointClick,
   onDataPointHover,
+  hoveredSubRegion,
 }: InfrastructureScatterPlotProps) {
+  
+  initializeNationwideDataOnce(regionsInfo);
+
+  const visitorData = cachedVisitorData!;
+  const scatterData = cachedScatterData;
+  const colorScaleMax = cachedColorScaleMax;
+
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
   const [clickedPointId, setClickedPointId] = useState<string | null>(null);
   
@@ -166,25 +193,19 @@ export function InfrastructureScatterPlot({
     setClickedPointId(null);
   }, [selectedRegion, selectedSubRegion]);
   
-  const scatterData = useMemo(
-    () => getScatterData(currentViewLevel),
-    [currentViewLevel],
-  );
   const clickedPoint = useMemo(
     () => scatterData.find((entry) => entry.id === clickedPointId) ?? null,
     [clickedPointId, scatterData],
   );
+  
   const selectedPoint = useMemo(
-    () =>
-      scatterData.find(
-        (entry) => selectedSubRegion === entry.id || selectedSubRegionName === entry.name,
-      ) ?? null,
-    [scatterData, selectedSubRegion, selectedSubRegionName],
+    () => (selectedSubRegion ? scatterData.find((entry) => entry.id === `${selectedRegion}-${selectedSubRegion}`) : null),
+    [scatterData, selectedRegion, selectedSubRegion],
   );
 
   const mapHoveredPoint = useMemo(
-    () => scatterData.find((entry) => entry.id === hoveredSubRegion) ?? null,
-    [hoveredSubRegion, scatterData],
+    () => (hoveredSubRegion ? scatterData.find((entry) => entry.id === `${selectedRegion}-${hoveredSubRegion}`) : null),
+    [hoveredSubRegion, selectedRegion, scatterData],
   );
 
   const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint ?? mapHoveredPoint;
@@ -192,8 +213,8 @@ export function InfrastructureScatterPlot({
   useEffect(() => {
     if (!activePiePoint) return;
     const timer = setTimeout(() => {
-      const dotElement = document.querySelector(`.scatter-dot-${activePiePoint.id}`);
-      if (dotElement) {
+      const dotElement = document.getElementsByClassName(`scatter-dot-${activePiePoint.id}`)[0];
+      if (dotElement instanceof SVGCircleElement) {
         const cx = Number(dotElement.getAttribute("cx"));
         const cy = Number(dotElement.getAttribute("cy"));
         if (!isNaN(cx) && !isNaN(cy)) {
@@ -206,101 +227,61 @@ export function InfrastructureScatterPlot({
 
   const highlightedScatterData = useMemo(
     () =>
-      scatterData.map((entry) => {
-        const isHovered =
-          currentViewLevel === "national"
-            ? hoveredPoint?.id === entry.id
-            : hoveredSubRegion === entry.id ||
-              hoveredPoint?.id === entry.id ||
-              hoveredPoint?.name === entry.name;
-        const isClicked =
-          currentViewLevel === "national"
-            ? clickedPointId === entry.id
-            : clickedPointId === entry.id;
-        const isSelected =
-          currentViewLevel === "national"
-            ? selectedRegion === entry.id
-            : selectedSubRegion === entry.id || selectedSubRegionName === entry.name;
+      scatterData
+        .filter((entry) => {
+          if (!selectedRegion || selectedRegion === "national") return true;
+          return entry.id.startsWith(`${selectedRegion}-`);
+        })
+        .map((entry) => {
+          const isChartHovered = hoveredPoint?.id === entry.id;
+          const isMapHovered = hoveredSubRegion ? entry.id === `${selectedRegion}-${hoveredSubRegion}` : false;
+          const isHovered = isChartHovered || isMapHovered;
 
-        return {
-          ...entry,
-          highlightState: isClicked || isSelected ? "selected" : isHovered ? "hovered" : null,
-        };
-      }),
-    [
-      clickedPointId,
-      currentViewLevel,
-      hoveredPoint,
-      hoveredSubRegion,
-      scatterData,
-      selectedRegion,
-      selectedSubRegion,
-      selectedSubRegionName,
-    ],
+          const isChartClicked = clickedPointId === entry.id;
+          const isMapSelected = selectedSubRegion ? entry.id === `${selectedRegion}-${selectedSubRegion}` : false;
+          const isSelected = isChartClicked || isMapSelected;
+
+          const visitors = visitorData[entry.id] || 0;
+          const spending = entry.spending || 0;
+
+          return {
+            ...entry,
+            visitors,
+            spending,
+            highlightState: isSelected ? "selected" : isHovered ? "hovered" : null,
+          };
+        }),
+    [clickedPointId, hoveredPoint, hoveredSubRegion, scatterData, selectedRegion, selectedSubRegion, visitorData],
   );
 
-  const pieData = useMemo(
-    () => {
-      const data = getAccommodationAdjustedData(currentViewLevel, activePiePoint?.name ?? null);
-      return [...data].sort((a, b) => b.value - a.value);
-    },
-    [currentViewLevel, activePiePoint],
-  );
-
-  const currentRegionLabel = useMemo(() => {
-    if (currentViewLevel === "national") return "전국 시도 기준";
-    const region = regionsInfo.find((item) => item.id === currentViewLevel);
-    return `${region?.name ?? ""} 시군구 기준`;
-  }, [currentViewLevel, regionsInfo]);
-
-  const pieTotal = useMemo(
-    () => pieData.reduce((sum, item) => sum + item.value, 0),
-    [pieData],
-  );
+  const displayRegionTitle = useMemo(() => {
+    if (!activePiePoint) return "";
+    const idParts = activePiePoint.id.split("-");
+    if (idParts.length > 1) {
+      const provinceId = idParts[0];
+      const fullProvinceNames: Record<string, string> = {
+        seoul: "서울특별시", busan: "부산광역시", daegu: "대구광역시",
+        incheon: "인천광역시", gwangju: "광주광역시", daejeon: "대전광역시",
+        ulsan: "울산광역시", sejong: "세종특별자치시", gyeonggi: "경기도",
+        gangwon: "강원특별자치도", chungbuk: "충청북도", chungnam: "충청남도",
+        jeonbuk: "전북특별자치도", jeonnam: "전라남도", gyeongbuk: "경상북도",
+        gyeongnam: "경상남도", jeju: "제주특별자치도"
+      };
+      const provinceName = fullProvinceNames[provinceId] || regionsInfo.find((r) => r.id === provinceId)?.name || "";
+      return `${provinceName} ${activePiePoint.name}`;
+    }
+    return activePiePoint.name;
+  }, [activePiePoint, regionsInfo]);
 
   const handlePointHover = (item: ScatterDataItem | null) => {
     setHoveredPoint(item);
     onDataPointHover?.(item);
   };
 
-  const handleChartMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    if (target.closest("[data-scatter-hit='true']")) return;
-    if (!hoveredPoint) return;
-    handlePointHover(null);
-  };
-
   const handlePointClick = (item: ScatterDataItem) => {
-    setClickedPointId((prevId) => {
-      if (prevId === item.id) {
-        handlePointHover(null);
-        return null;
-      }
-      return item.id;
-    });
+    setClickedPointId((prevId) => (prevId === item.id ? null : item.id));
     onDataPointClick?.(item);
   };
-
-  const visitorData = useMemo(() => {
-    const defaultMonth = 1;
-    
-    return currentViewLevel === "national" 
-      ? getProvinceVisitorTotals(defaultMonth)
-      : getDistrictVisitorTotals(currentViewLevel, defaultMonth);
-  }, [currentViewLevel]);
-
-  const colorScaleMax = useMemo(() => {
-    if (!visitorData) return 1;
-    const values = Object.values(visitorData).map(v => Number(v) || 0);
-    return values.length > 0 ? Math.max(...values) : 1;
-  }, [visitorData]);
-
-  const computedColorScaleMax = useMemo(() => {
-    if (!visitorData) return 1;
-    const values = Object.values(visitorData).map(v => Number(v) || 0);
-    return values.length > 0 ? Math.max(...values) : 1;
-  }, [visitorData]);
 
   const autoPositionStyle = useMemo(() => {
     if (!containerRef.current) return { left: `${mousePos.x}px`, top: `${mousePos.y}px` };
@@ -313,7 +294,7 @@ export function InfrastructureScatterPlot({
     if (posX + 270 > w) posX = mousePos.x - 30 - 270;
     if (posX < 10) posX = 10;
 
-    if (posY + 266 > h) posY = mousePos.y - 30 - 266;
+    if (posY + 140 > h) posY = mousePos.y - 30 - 140;
     if (posY < 10) posY = 10;
 
     return { left: `${posX}px`, top: `${posY}px` };
@@ -322,13 +303,19 @@ export function InfrastructureScatterPlot({
   return (
     <div className="relative w-full h-full bg-white rounded-xl shadow-lg p-6 border-[0.5px] border-gray-200 flex flex-col min-h-0">
       <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
-        <span>지역별 지가 대비 숙박 인프라 현황 분석</span>
+        <span>지역별 지가 대비 숙박 인프라 현황 분석 (전국 시군구 기준)</span>
       </h3>
 
       <div
         ref={containerRef}
         className="flex-1 min-h-0 relative"
-        onMouseMove={handleChartMouseMove}
+        onMouseMove={(e) => {
+          const target = e.target;
+          if (!(target instanceof Element)) return;
+          if (target.closest("[data-scatter-hit='true']")) return;
+          if (!hoveredPoint) return;
+          handlePointHover(null);
+        }}
         onMouseLeave={() => {
           setHoveredPoint(null);
           onDataPointHover?.(null);
@@ -341,6 +328,7 @@ export function InfrastructureScatterPlot({
               type="number"
               dataKey="price"
               name="평균 지가"
+              domain={[0, cachedMaxPrice]}
               tickFormatter={(value) => value.toLocaleString()}
               style={{ fontSize: "12px", fill: "#64748b" }}
               label={{
@@ -355,17 +343,24 @@ export function InfrastructureScatterPlot({
               type="number"
               dataKey="accommodation"
               name="숙박업소 수"
+              domain={[0, cachedMaxAccommodation]}
               tickFormatter={(value) => value.toLocaleString()}
               style={{ fontSize: "12px", fill: "#64748b" }}
               label={{
-                value: "숙박업소 수",
+                value: "숙박업소 수 (개)",
                 angle: -90,
                 position: "insideLeft",
                 fontSize: 12,
                 fill: "#475569",
               }}
             />
-            <ZAxis range={[80, 180]} />
+            {/* 💡 [수정] 원의 크기를 결정하는 Z축 역시 남은 점들의 상대 평가가 되지 않도록 절대 스케일(domain) 고정! */}
+            <ZAxis 
+              type="number" 
+              dataKey="spending" 
+              range={[16, 576]} 
+              domain={[0, cachedMaxSpending]} 
+            />
             <Tooltip cursor={{ strokeDasharray: "3 3", stroke: "#cbd5e1" }} content={() => null} />
             <Scatter
               data={highlightedScatterData}
@@ -376,11 +371,11 @@ export function InfrastructureScatterPlot({
                   onPointHover={handlePointHover}
                 />
               }
-              cursor={onDataPointClick ? "pointer" : "default"}
             >
               {highlightedScatterData.map((entry) => {
-                const visitors = visitorData ? (visitorData[entry.id] || visitorData[entry.name] || 0) : 0;
-                let cellColor = getHeatmapColor(visitors, colorScaleMax || 1);
+                const visitorValue = entry.visitors || 0;
+                // 색상 역시 이미 cachedColorScaleMax를 사용해 전국 기준으로 고정되어 있습니다.
+                const cellColor = getHeatmapColor(visitorValue, colorScaleMax);
 
                 return (
                   <Cell 
@@ -397,69 +392,39 @@ export function InfrastructureScatterPlot({
 
         {activePiePoint && (
           <div 
-            className="pointer-events-none absolute z-20 w-[270px] h-[266px] rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col transition-all duration-150 ease-out"
+            className="pointer-events-none absolute z-20 rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col transition-all duration-150 ease-out"
             style={autoPositionStyle}
           >
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-800 truncate">{activePiePoint.name}</p>
-                <p className="text-[10px] font-semibold text-gray-400 mt-0.5">숙박업소 현황</p>
+                <p className="text-xs font-bold text-gray-800 truncate">{displayRegionTitle}</p>
+                <p className="text-[10px] font-semibold text-gray-400 mt-0.5">상세 종합 입지 분석</p>
               </div>
               <span className="shrink-0 text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                {pieTotal.toLocaleString()}개
+                인프라 {activePiePoint.accommodation.toLocaleString()}개
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-2 gap-2">
               <div className="rounded-md bg-slate-50 border border-slate-100 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500 font-semibold">평균 지가</p>
+                <p className="text-[10px] text-slate-500 font-semibold">평균 지가(X축)</p>
                 <p className="text-xs font-black text-slate-800">
                   {activePiePoint.price.toLocaleString()}만원
                 </p>
               </div>
               <div className="rounded-md bg-slate-50 border border-slate-100 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500 font-semibold">숙박업소 수</p>
+                <p className="text-[10px] text-slate-500 font-semibold">숙박업소 수(Y축)</p>
                 <p className="text-xs font-black text-slate-800">
                   {activePiePoint.accommodation.toLocaleString()}개
                 </p>
               </div>
+              <div className="rounded-md bg-slate-50 border border-slate-100 px-2 py-1.5">
+                <p className="text-[10px] text-slate-500 font-semibold">2025 숙박 소비액(Size)</p>
+                <p className="text-xs font-black text-slate-800">
+                  {(activePiePoint.spending || 0).toLocaleString()}천원
+                </p>
+              </div>
             </div>
-
-            {pieData.length > 0 ? (
-              <div className="flex-1 min-h-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius="57%"
-                      outerRadius="91%"
-                      paddingAngle={2}
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                      startAngle={90}
-                      endAngle={-270}
-                      animationDuration={300}
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<PieTooltip />} />
-                    <Legend
-                      verticalAlign="bottom"
-                      iconSize={8}
-                      wrapperStyle={{ fontSize: "10px", lineHeight: "14px" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-center text-xs text-gray-400 leading-5">
-                숙박 유형 데이터가 없습니다.
-              </div>
-            )}
           </div>
         )}
       </div>

@@ -139,7 +139,7 @@ function getLandPrice(provinceId: string, districtName: string | null) {
   return Math.round((rows.reduce((sum, row) => sum + row.price, 0) / rows.length) * 10) / 10;
 }
 
-function getAccommodationSpending(provinceId: string, districtName: string | null) {
+export function getAccommodationSpending(provinceId: string, districtName: string | null) {
   const provinceName = provinceIdToCsvName[provinceId];
   if (!provinceName) return null;
 

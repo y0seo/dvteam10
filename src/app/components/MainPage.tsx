@@ -341,10 +341,8 @@ export function MainPage() {
         <div className="flex-1 flex gap-4 min-h-0 relative">
           {showAccommodation ? (
             <InfrastructureScatterPlot
-              currentViewLevel={currentViewLevel}
-              selectedRegion={selectedRegion}
+              selectedRegion={"national"}
               selectedSubRegion={selectedSubRegion}
-              selectedSubRegionName={selectedSubRegionName}
               hoveredSubRegion={hoveredSubRegion}
               regionsInfo={regionsInfo}
               onDataPointHover={(item) => setHoveredSubRegion(item?.id ?? null)}
