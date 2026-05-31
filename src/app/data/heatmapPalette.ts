@@ -27,6 +27,17 @@ export function getHeatmapColor(value: number, max: number): string {
   return HEATMAP_PALETTE[idx];
 }
 
+export function getHeatmapColorFromRatio(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return HEATMAP_MISSING_COLOR;
+  const ratio = Math.max(0, Math.min(1, value));
+  const stretched = Math.pow(ratio, HEATMAP_EXPONENT);
+  const idx = Math.min(
+    HEATMAP_PALETTE.length - 1,
+    Math.floor(stretched * HEATMAP_PALETTE.length),
+  );
+  return HEATMAP_PALETTE[idx];
+}
+
 // Build linear CSS gradient string spanning the palette (low → high).
 // Use as `background` on the legend bar.
 export const HEATMAP_GRADIENT = `linear-gradient(to top, ${HEATMAP_PALETTE.join(", ")})`;

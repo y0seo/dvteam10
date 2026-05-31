@@ -3,17 +3,16 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import KoreaMapSvgRaw from "../../imports/kr1.svg?raw";
 import {
   HEATMAP_GRADIENT,
-  formatVisitorsInMan,
-  getHeatmapColor,
+  getHeatmapColorFromRatio,
 } from "../data/heatmapPalette";
+import type { OpportunityDatum } from "../data/opportunityData";
 
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
   onRegionHover: (region: string | null) => void;
   onRegionDoubleClick: (region: string) => void; 
   selectedRegion: string | null;
-  visitorData: { [key: string]: number };
-  colorScaleMax: number;
+  opportunityData: Record<string, OpportunityDatum>;
 }
 
 const regionsInfo = [
@@ -28,7 +27,7 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
@@ -65,8 +64,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
-      const visitors = visitorData[region.id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
+      const heatmapColor = getHeatmapColorFromRatio(opportunityData[region.id]?.intensity);
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
 
@@ -95,7 +93,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       `;
     });
     return styles;
-  }, [visitorData, selectedRegion, hoveredRegion, colorScaleMax]);
+  }, [opportunityData, selectedRegion, hoveredRegion]);
 
   const validIds = regionsInfo.map(r => r.id);
 
@@ -119,6 +117,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   };
 
   const currentRegion = regionsInfo.find(r => r.id === (hoveredRegion || selectedRegion));
+  const currentOpportunity = currentRegion ? opportunityData[currentRegion.id] : null;
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
@@ -128,11 +127,10 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       {currentRegion && (
         <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
-            {currentRegion.name} 관광객 수
+            {currentRegion.name} 입지 기회도
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {visitorData[currentRegion.id]?.toLocaleString() || 0}
-            <span className="text-base text-gray-600 font-medium ml-1">명</span>
+            {currentOpportunity?.opportunityScore.toFixed(3) ?? "-"}
           </p>
         </div>
       )}
@@ -153,15 +151,15 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
 
       {/* 우측 하단 범례 */}
       <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <p className="text-[10px] font-bold text-gray-700 mb-2">입지 기회도</p>
         <div className="flex items-stretch gap-2.5">
           <div
             className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(colorScaleMax)}</span>
-            <span>0명</span>
+            <span>높음</span>
+            <span>낮음</span>
           </div>
         </div>
       </div>

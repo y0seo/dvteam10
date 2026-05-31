@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   HEATMAP_GRADIENT,
-  formatVisitorsInMan,
-  getHeatmapColor,
+  getHeatmapColorFromRatio,
 } from "../data/heatmapPalette";
+import type { OpportunityDatum } from "../data/opportunityData";
 import SeoulSvg from "../../imports/simple/sl.svg?raw";
 import BusanSvg from "../../imports/simple/bs.svg?raw";
 import GyeonggiSvg from "../../imports/simple/gg.svg?raw";
@@ -45,8 +45,7 @@ const getSvgAttribute = (tag: string, attribute: string) => {
 interface DetailRegionMapProps {
   regionId: string;
   onBack: () => void;
-  visitorData: Record<string, number>;
-  colorScaleMax: number;
+  opportunityData: Record<string, OpportunityDatum>;
   onSubRegionClick: (subId: string, subName: string) => void; 
   onSubRegionHover?: (subId: string | null) => void;
   selectedSubRegion: string | null;
@@ -54,7 +53,7 @@ interface DetailRegionMapProps {
   selectedCompareSubRegions?: string[];
 }
 
-export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number }[]>([]);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
@@ -78,7 +77,6 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   }, [svgContent]);
 
   const subRegionIds = useMemo(() => Object.keys(subRegionMap), [subRegionMap]);
-  const subRegionData = visitorData;
   const activeHoveredSubRegion = hoveredSubRegion || externalHoveredSubRegion;
 
   const updateHoveredSubRegion = (id: string | null) => {
@@ -106,8 +104,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
-      const visitors = subRegionData[id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
+      const heatmapColor = getHeatmapColorFromRatio(opportunityData[id]?.intensity);
       const isSelected = selectedSubRegion === id;
       const isCompareSelected = selectedCompareSubRegions.includes(id);
       const isHovered = activeHoveredSubRegion === id;
@@ -138,7 +135,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       `;
     });
     return styles;
-  }, [subRegionData, selectedSubRegion, colorScaleMax, selectedCompareSubRegions, activeHoveredSubRegion, subRegionIds]);
+  }, [opportunityData, selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, subRegionIds]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -180,6 +177,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   };
 
   const currentRegionId = activeHoveredSubRegion || selectedSubRegion;
+  const currentOpportunity = currentRegionId ? opportunityData[currentRegionId] : null;
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
@@ -194,8 +192,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
             {currentRegionId ? subRegionMap[currentRegionId] : "구역을 선택하세요"}
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {currentRegionId ? subRegionData[currentRegionId]?.toLocaleString() : "0"}
-            <span className="text-base text-gray-600 font-medium ml-1">명</span>
+            {currentOpportunity?.opportunityScore.toFixed(3) ?? "-"}
           </p>
         </div>
       </div>
@@ -223,15 +220,15 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
       {/* 범례 */}
       <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <p className="text-[10px] font-bold text-gray-700 mb-2">입지 기회도</p>
         <div className="flex items-stretch gap-2.5">
           <div
             className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(colorScaleMax)}</span>
-            <span>0명</span>
+            <span>높음</span>
+            <span>낮음</span>
           </div>
         </div>
       </div>
