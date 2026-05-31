@@ -4,6 +4,7 @@ import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
 import { ComparePage } from "./ComparePage";
+import { MainSelectionRadarChart } from "./MainSelectionRadarChart";
 import { getDetailOpportunityScores, getMainOpportunityScores } from "../data/opportunityData";
 
 const regionsInfo = [
@@ -59,15 +60,13 @@ export function MainPage() {
     [currentViewLevel],
   );
   const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
+  const compareScatterPointIds = useMemo(
+    () => compareRegions.map((region) => `${region.provinceId}-${region.id}`),
+    [compareRegions],
+  );
   const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
 
-  const handleSubRegionSelect = (subId: string, subName: string) => {
-    const isSameSelected = selectedSubRegion === subId || selectedSubRegionName === subName;
-    setSelectedSubRegion(isSameSelected ? null : subId);
-    setSelectedSubRegionName(isSameSelected ? null : subName);
-
-    if (!isCompareMode) return;
-
+  const toggleCompareRegion = (subId: string, subName: string) => {
     setCompareRegions((prev) => {
       if (prev.some((region) => region.id === subId)) {
         return prev.filter((region) => region.id !== subId);
@@ -75,6 +74,15 @@ export function MainPage() {
       if (prev.length >= 3) return prev;
       return [...prev, { id: subId, name: subName, provinceId: currentViewLevel, provinceName: currentProvinceName }];
     });
+  };
+
+  const handleSubRegionSelect = (subId: string, subName: string) => {
+    const isSameSelected = selectedSubRegion === subId || selectedSubRegionName === subName;
+    setSelectedSubRegion(isSameSelected ? null : subId);
+    setSelectedSubRegionName(isSameSelected ? null : subName);
+
+    if (!isCompareMode) return;
+    toggleCompareRegion(subId, subName);
   };
 
   const removeCompareRegion = (regionId: string) => {
@@ -122,6 +130,13 @@ export function MainPage() {
     }
 
     if (!subRegionId || provinceId !== currentViewLevel) return;
+
+    if (isCompareMode) {
+      resetSubRegionState();
+      toggleCompareRegion(subRegionId, item.name);
+      return;
+    }
+
     handleSubRegionSelect(subRegionId, item.name);
   };
 
@@ -239,7 +254,7 @@ export function MainPage() {
       </div>
 
       <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
-        <div className="flex-1 flex gap-4 min-h-0 relative">
+        <div className={`${compareRegions.length > 0 ? "flex-[1.35]" : "flex-1"} min-h-0 relative`}>
           <InfrastructureScatterPlot
             currentViewLevel={currentViewLevel}
             selectedRegion={currentViewLevel === "national" ? "national" : currentViewLevel}
@@ -247,10 +262,17 @@ export function MainPage() {
             selectedSubRegionName={selectedSubRegionName}
             hoveredSubRegion={hoveredSubRegion}
             regionsInfo={regionsInfo}
+            selectedComparePointIds={compareScatterPointIds}
+            isCompareMode={isCompareMode}
             onDataPointHover={handleScatterHover}
             onDataPointClick={handleScatterClick}
           />
         </div>
+        {compareRegions.length > 0 && (
+          <div className="flex-[0.95] min-h-0">
+            <MainSelectionRadarChart selectedRegions={compareRegions} />
+          </div>
+        )}
       </div>
     </div>
   );

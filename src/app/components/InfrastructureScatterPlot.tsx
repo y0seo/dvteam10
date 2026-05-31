@@ -28,6 +28,8 @@ interface InfrastructureScatterPlotProps {
   selectedSubRegionName: string | null;
   hoveredSubRegion?: string | null;
   regionsInfo: { id: string; name: string }[];
+  selectedComparePointIds?: string[];
+  isCompareMode?: boolean;
   onDataPointClick?: (item: ScatterDataItem) => void;
   onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
@@ -42,6 +44,8 @@ type ExtendedScatterDataItem = ScatterDataItem & {
 
 type HighlightedScatterPointPayload = ExtendedScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
+  isCompareSelected?: boolean;
+  isDimmed?: boolean;
 };
 
 interface HighlightedScatterPointProps {
@@ -126,6 +130,7 @@ function HighlightedScatterPoint({
   const highlightState = payload?.highlightState;
   const isSelected = highlightState === "selected";
   const isHovered = highlightState === "hovered";
+  const isDimmed = Boolean(payload?.isDimmed);
   
   const baseRadius = size ? Math.sqrt(size) : 5;
   const radius = isSelected || isHovered ? baseRadius + 3 : baseRadius; 
@@ -170,7 +175,31 @@ function HighlightedScatterPoint({
         fill={fill}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
+        opacity={isDimmed ? 0.12 : 1}
       />
+      {payload?.isCompareSelected && (
+        <g pointerEvents="none">
+          <circle
+            cx={cx}
+            cy={cy}
+            r={Math.max(radius + 6, 12)}
+            fill="#ab9241"
+            stroke="#ffffff"
+            strokeWidth={2}
+          />
+          <text
+            x={cx}
+            y={cy + 0.7}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={Math.max(radius + 5, 13)}
+            fontWeight={900}
+            fill="#ffffff"
+          >
+            ✓
+          </text>
+        </g>
+      )}
     </g>
   );
 }
@@ -179,6 +208,8 @@ export function InfrastructureScatterPlot({
   selectedRegion,
   selectedSubRegion,
   regionsInfo,
+  selectedComparePointIds = [],
+  isCompareMode = false,
   onDataPointClick,
   onDataPointHover,
   hoveredSubRegion,
@@ -197,7 +228,7 @@ export function InfrastructureScatterPlot({
 
   useEffect(() => {
     setClickedPointId(null);
-  }, [selectedRegion, selectedSubRegion]);
+  }, [selectedRegion]);
   
   const clickedPoint = useMemo(
     () => scatterData.find((entry) => entry.id === clickedPointId) ?? null,
@@ -242,17 +273,29 @@ export function InfrastructureScatterPlot({
           const isChartHovered = hoveredPoint?.id === entry.id;
           const isMapHovered = hoveredSubRegion ? entry.id === `${selectedRegion}-${hoveredSubRegion}` : false;
           const isHovered = isChartHovered || isMapHovered;
+          const hasHoveredPoint = Boolean(hoveredPoint || hoveredSubRegion);
 
           const isChartClicked = clickedPointId === entry.id;
           const isMapSelected = selectedSubRegion ? entry.id === `${selectedRegion}-${selectedSubRegion}` : false;
           const isSelected = isChartClicked || isMapSelected;
+          const isCompareSelected = selectedComparePointIds.includes(entry.id);
 
           return {
             ...entry,
             highlightState: isSelected ? "selected" : isHovered ? "hovered" : null,
+            isCompareSelected,
+            isDimmed: hasHoveredPoint && !isHovered && !isSelected && !isCompareSelected,
           };
         }),
-    [clickedPointId, hoveredPoint, hoveredSubRegion, scatterData, selectedRegion, selectedSubRegion],
+    [
+      clickedPointId,
+      hoveredPoint,
+      hoveredSubRegion,
+      scatterData,
+      selectedComparePointIds,
+      selectedRegion,
+      selectedSubRegion,
+    ],
   );
 
   const displayRegionTitle = useMemo(() => {
@@ -280,6 +323,14 @@ export function InfrastructureScatterPlot({
   };
 
   const handlePointClick = (item: ScatterDataItem) => {
+    if (isCompareMode) {
+      setClickedPointId(null);
+      setHoveredPoint(null);
+      onDataPointHover?.(null);
+      onDataPointClick?.(item);
+      return;
+    }
+
     setClickedPointId((prevId) => (prevId === item.id ? null : item.id));
     onDataPointClick?.(item);
   };
