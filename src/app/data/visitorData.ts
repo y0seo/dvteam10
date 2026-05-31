@@ -52,42 +52,19 @@ const visitorRows: VisitorRow[] = visitorsCsvRaw
 const isInMonthRange = (month: string, startMonth: string, endMonth: string) =>
   month >= startMonth && month <= endMonth;
 
-const getMonthNumber = (month: string) => Number(month.slice(5, 7));
-
 const averageTotals = (sums: Record<string, number>, counts: Record<string, number>) =>
   Object.fromEntries(
     Object.entries(sums).map(([key, sum]) => [key, Math.round(sum / Math.max(counts[key] || 1, 1))]),
   );
 
-export function getProvinceVisitorTotals(selectedMonth: number): Record<string, number>;
-export function getProvinceVisitorTotals(startMonth: string, endMonth: string): Record<string, number>;
-export function getProvinceVisitorTotals(monthOrStart: number | string, endMonth = "2025-12") {
+// 1. 전국(시/도) 단위 방문객 전체 평균
+export function getProvinceVisitorTotals(startMonth = "2023-01", endMonth = "2025-12") {
   const totals: Record<string, number> = {};
-
-  if (typeof monthOrStart === "number") {
-    const counts: Record<string, number> = {};
-    const seenProvinceMonths = new Set<string>();
-
-    for (const row of visitorRows) {
-      if (getMonthNumber(row.month) !== monthOrStart) continue;
-
-      const provinceId = provinceCsvNameToId[row.provinceName];
-      if (!provinceId) continue;
-
-      const key = `${row.month}|${row.provinceName}`;
-      if (seenProvinceMonths.has(key)) continue;
-
-      seenProvinceMonths.add(key);
-      totals[provinceId] = (totals[provinceId] || 0) + row.provinceVisitors;
-      counts[provinceId] = (counts[provinceId] || 0) + 1;
-    }
-
-    return averageTotals(totals, counts);
-  }
-
+  const counts: Record<string, number> = {};
   const seenProvinceMonths = new Set<string>();
+
   for (const row of visitorRows) {
-    if (!isInMonthRange(row.month, monthOrStart, endMonth)) continue;
+    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
 
     const provinceId = provinceCsvNameToId[row.provinceName];
     if (!provinceId) continue;
@@ -97,43 +74,32 @@ export function getProvinceVisitorTotals(monthOrStart: number | string, endMonth
 
     seenProvinceMonths.add(key);
     totals[provinceId] = (totals[provinceId] || 0) + row.provinceVisitors;
+    counts[provinceId] = (counts[provinceId] || 0) + 1;
   }
 
-  return totals;
+  return averageTotals(totals, counts);
 }
 
-export function getDistrictVisitorTotals(regionId: string, selectedMonth: number): Record<string, number>;
-export function getDistrictVisitorTotals(regionId: string, startMonth: string, endMonth: string): Record<string, number>;
-export function getDistrictVisitorTotals(regionId: string, monthOrStart: number | string, endMonth = "2025-12") {
+// 2. 구체적 광역지자체 내 시/군/구 방문객 전체 평균
+export function getDistrictVisitorTotals(regionId: string, startMonth = "2023-01", endMonth = "2025-12") {
   const provinceName = provinceIdToCsvName[regionId];
   const totals: Record<string, number> = {};
+  const counts: Record<string, number> = {};
 
   if (!provinceName) return totals;
 
-  if (typeof monthOrStart === "number") {
-    const counts: Record<string, number> = {};
-
-    for (const row of visitorRows) {
-      if (row.provinceName !== provinceName) continue;
-      if (getMonthNumber(row.month) !== monthOrStart) continue;
-
-      totals[row.districtName] = (totals[row.districtName] || 0) + row.districtVisitors;
-      counts[row.districtName] = (counts[row.districtName] || 0) + 1;
-    }
-
-    return averageTotals(totals, counts);
-  }
-
   for (const row of visitorRows) {
     if (row.provinceName !== provinceName) continue;
-    if (!isInMonthRange(row.month, monthOrStart, endMonth)) continue;
+    if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
 
     totals[row.districtName] = (totals[row.districtName] || 0) + row.districtVisitors;
+    counts[row.districtName] = (counts[row.districtName] || 0) + 1;
   }
 
-  return totals;
+  return averageTotals(totals, counts);
 }
 
+// 3. 특정 지역(시도 또는 시군구)의 단일 방문객 평균치
 export function getRegionVisitorTotal(
   provinceId: string,
   districtName: string | null,
@@ -143,24 +109,33 @@ export function getRegionVisitorTotal(
   const provinceName = provinceIdToCsvName[provinceId];
   if (!provinceName) return 0;
 
+  let sum = 0;
+  let count = 0;
+
   if (districtName) {
-    return visitorRows.reduce((sum, row) => {
-      if (row.provinceName !== provinceName || row.districtName !== districtName) return sum;
-      if (!isInMonthRange(row.month, startMonth, endMonth)) return sum;
-      return sum + row.districtVisitors;
-    }, 0);
+    for (const row of visitorRows) {
+      if (row.provinceName === provinceName && row.districtName === districtName && isInMonthRange(row.month, startMonth, endMonth)) {
+        sum += row.districtVisitors;
+        count++;
+      }
+    }
+  } else {
+    const seenMonths = new Set<string>();
+    for (const row of visitorRows) {
+      if (row.provinceName === provinceName && isInMonthRange(row.month, startMonth, endMonth)) {
+        if (!seenMonths.has(row.month)) {
+          seenMonths.add(row.month);
+          sum += row.provinceVisitors;
+          count++;
+        }
+      }
+    }
   }
 
-  const seenMonths = new Set<string>();
-  return visitorRows.reduce((sum, row) => {
-    if (row.provinceName !== provinceName) return sum;
-    if (!isInMonthRange(row.month, startMonth, endMonth)) return sum;
-    if (seenMonths.has(row.month)) return sum;
-    seenMonths.add(row.month);
-    return sum + row.provinceVisitors;
-  }, 0);
+  return count === 0 ? 0 : Math.round(sum / count);
 }
 
+// 4. 특정 지역의 월별 트렌드 (차트용 유지)
 export function getRegionMonthlyVisitorTrend(
   provinceId: string,
   districtName: string | null,
@@ -193,42 +168,51 @@ export function getRegionMonthlyVisitorTrend(
     .map(([month, visitors]) => ({ month, visitors }));
 }
 
+// 5. 전국의 모든 시/군/구별 방문객 전체 평균 목록
 export function getAllDistrictVisitorTotals(
   startMonth = "2023-01",
   endMonth = "2025-12",
 ): { provinceName: string; districtName: string; total: number }[] {
   const totalsMap = new Map<
     string,
-    { provinceName: string; districtName: string; total: number }
+    { provinceName: string; districtName: string; sum: number; count: number }
   >();
+  
   for (const row of visitorRows) {
     if (!row.districtName) continue;
     if (!isInMonthRange(row.month, startMonth, endMonth)) continue;
+    
     const key = `${row.provinceName}|${row.districtName}`;
     const existing = totalsMap.get(key);
+    
     if (existing) {
-      existing.total += row.districtVisitors;
+      existing.sum += row.districtVisitors;
+      existing.count += 1;
     } else {
       totalsMap.set(key, {
         provinceName: row.provinceName,
         districtName: row.districtName,
-        total: row.districtVisitors,
+        sum: row.districtVisitors,
+        count: 1,
       });
     }
   }
-  return Array.from(totalsMap.values()).filter((row) => row.total > 0);
+  
+  return Array.from(totalsMap.values())
+    .map((row) => ({
+      provinceName: row.provinceName,
+      districtName: row.districtName,
+      total: Math.round(row.sum / row.count),
+    }))
+    .filter((row) => row.total > 0);
 }
 
 export function getProvinceVisitorScaleMax() {
-  const monthlyMaxes = Array.from({ length: 12 }, (_, index) =>
-    Math.max(...Object.values(getProvinceVisitorTotals(index + 1)), 1),
-  );
-  return Math.max(...monthlyMaxes, 1);
+  const totals = getProvinceVisitorTotals();
+  return Math.max(...Object.values(totals), 1);
 }
 
 export function getDistrictVisitorScaleMax(regionId: string) {
-  const monthlyMaxes = Array.from({ length: 12 }, (_, index) =>
-    Math.max(...Object.values(getDistrictVisitorTotals(regionId, index + 1)), 1),
-  );
-  return Math.max(...monthlyMaxes, 1);
+  const totals = getDistrictVisitorTotals(regionId);
+  return Math.max(...Object.values(totals), 1);
 }

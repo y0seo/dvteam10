@@ -1,23 +1,27 @@
-// Steel-blue heatmap palette — lightest → darkest navy.
-// Discrete steps give crisp visual distinction (opacity-based maps tend to look washed-out).
+// Green opportunity heatmap palette (10 steps) — lightest → darkest green
 export const HEATMAP_PALETTE = [
-  "#dbe9f1", // 0 - very pale
-  "#a4c5d4",
-  "#7aabc1",
-  "#5d92ac",
-  "#3a6e8c",
-  "#22557a",
-  "#143d5c", // 6 - deep navy
+  "#f7fcf5", // 0  
+  "#e5f5e0", // 1  
+  "#c7e9c0", // 2  
+  "#a1d99b", // 3  
+  "#74c476", // 4  
+  "#41ab5d", // 5 
+  "#238b45", // 6  
+  "#006d2c", // 7 
+  "#005a32", // 8 
+  "#00441b", // 9 
 ] as const;
 
-export const HEATMAP_MISSING_COLOR = "#e5e7eb"; // gray-200 for no-data regions
+// Missing data
+export const HEATMAP_MISSING_COLOR = "#f3f4f6"; 
 
 // Non-linear exponent (< 1 stretches low values into more color bins,
 // useful when a few outliers dominate the absolute max).
-const HEATMAP_EXPONENT = 0.45;
+const HEATMAP_EXPONENT = 0.99;
 
-export function getHeatmapColor(value: number, max: number): string {
-  if (!value || value <= 0) return HEATMAP_MISSING_COLOR;
+export function getHeatmapColor(value: number | null | undefined, max: number): string {
+  if (value == null || Number.isNaN(value) || value < 0) return HEATMAP_MISSING_COLOR;
+  
   const ratio = Math.max(0, Math.min(1, value / Math.max(max, 1)));
   const stretched = Math.pow(ratio, HEATMAP_EXPONENT);
   const idx = Math.min(
@@ -28,7 +32,8 @@ export function getHeatmapColor(value: number, max: number): string {
 }
 
 export function getHeatmapColorFromRatio(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return HEATMAP_MISSING_COLOR;
+  if (value == null || Number.isNaN(value) || value < 0) return HEATMAP_MISSING_COLOR;
+  
   const ratio = Math.max(0, Math.min(1, value));
   const stretched = Math.pow(ratio, HEATMAP_EXPONENT);
   const idx = Math.min(

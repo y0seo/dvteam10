@@ -32,12 +32,16 @@ interface InfrastructureScatterPlotProps {
   onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
-const SELECTED_POINT_COLOR = "#ea580c";
-const HOVERED_POINT_COLOR = "#c17aab";
+const SELECTED_POINT_COLOR = "#ab9241";
+const HOVERED_POINT_COLOR = "#ab418f";
 
-type HighlightedScatterPointPayload = ScatterDataItem & {
+type ExtendedScatterDataItem = ScatterDataItem & {
+  spending: number;
+  visitors: number;
+};
+
+type HighlightedScatterPointPayload = ExtendedScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
-  spending?: number;
 };
 
 interface HighlightedScatterPointProps {
@@ -52,7 +56,7 @@ interface HighlightedScatterPointProps {
 }
 
 let cachedVisitorData: Record<string, number> | null = null;
-let cachedScatterData: (ScatterDataItem & { spending: number })[] = [];
+let cachedScatterData: ExtendedScatterDataItem[] = [];
 let cachedColorScaleMax = 1;
 let cachedMaxPrice = 1;
 let cachedMaxAccommodation = 1;
@@ -61,12 +65,12 @@ let cachedMaxSpending = 1;
 function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[]) {
   if (cachedVisitorData !== null) return;
 
-  const defaultMonth = 1;
   const visitors: Record<string, number> = {};
-  let scatter: (ScatterDataItem & { spending: number })[] = [];
+  let scatter: ExtendedScatterDataItem[] = [];
 
   regionsInfo.forEach((region) => {
-    const data = getDistrictVisitorTotals(region.id, defaultMonth) || getDistrictVisitorTotals(region.id) || {};
+    
+    const data = getDistrictVisitorTotals(region.id) || {};
     Object.entries(data).forEach(([districtName, value]) => {
       visitors[`${region.id}-${districtName}`] = value;
     });
@@ -74,10 +78,13 @@ function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[
     const scatterRaw = getScatterData(region.id) || [];
     const mappedData = scatterRaw.map((item) => {
       const actualSpending = getAccommodationSpending(region.id, item.name) || 0;
+      const actualVisitors = visitors[`${region.id}-${item.name}`] || 0; 
+
       return {
         ...item,
         id: `${region.id}-${item.id}`,
         spending: actualSpending, 
+        visitors: actualVisitors, 
       };
     });
     scatter = [...scatter, ...mappedData];
@@ -123,7 +130,7 @@ function HighlightedScatterPoint({
   const baseRadius = size ? Math.sqrt(size) : 5;
   const radius = isSelected || isHovered ? baseRadius + 3 : baseRadius; 
   
-  const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#ffffff";
+  const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#b3b3b33a";
   const strokeWidth = isSelected || isHovered ? 3 : 1.5;
 
   return (
@@ -150,9 +157,9 @@ function HighlightedScatterPoint({
           cy={cy}
           r={radius + 4}
           fill="none"
-          stroke="#ffffff"
+          stroke="#6a6a6a"
           strokeWidth={5}
-          opacity={0.95}
+          opacity={0.2}
         />
       )}
       <circle
@@ -179,7 +186,6 @@ export function InfrastructureScatterPlot({
   
   initializeNationwideDataOnce(regionsInfo);
 
-  const visitorData = cachedVisitorData!;
   const scatterData = cachedScatterData;
   const colorScaleMax = cachedColorScaleMax;
 
@@ -241,17 +247,12 @@ export function InfrastructureScatterPlot({
           const isMapSelected = selectedSubRegion ? entry.id === `${selectedRegion}-${selectedSubRegion}` : false;
           const isSelected = isChartClicked || isMapSelected;
 
-          const visitors = visitorData[entry.id] || 0;
-          const spending = entry.spending || 0;
-
           return {
             ...entry,
-            visitors,
-            spending,
             highlightState: isSelected ? "selected" : isHovered ? "hovered" : null,
           };
         }),
-    [clickedPointId, hoveredPoint, hoveredSubRegion, scatterData, selectedRegion, selectedSubRegion, visitorData],
+    [clickedPointId, hoveredPoint, hoveredSubRegion, scatterData, selectedRegion, selectedSubRegion],
   );
 
   const displayRegionTitle = useMemo(() => {
@@ -354,7 +355,6 @@ export function InfrastructureScatterPlot({
                 fill: "#475569",
               }}
             />
-            {/* 💡 [수정] 원의 크기를 결정하는 Z축 역시 남은 점들의 상대 평가가 되지 않도록 절대 스케일(domain) 고정! */}
             <ZAxis 
               type="number" 
               dataKey="spending" 
@@ -374,7 +374,6 @@ export function InfrastructureScatterPlot({
             >
               {highlightedScatterData.map((entry) => {
                 const visitorValue = entry.visitors || 0;
-                // 색상 역시 이미 cachedColorScaleMax를 사용해 전국 기준으로 고정되어 있습니다.
                 const cellColor = getHeatmapColor(visitorValue, colorScaleMax);
 
                 return (
@@ -398,11 +397,7 @@ export function InfrastructureScatterPlot({
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
                 <p className="text-xs font-bold text-gray-800 truncate">{displayRegionTitle}</p>
-                <p className="text-[10px] font-semibold text-gray-400 mt-0.5">상세 종합 입지 분석</p>
-              </div>
-              <span className="shrink-0 text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                인프라 {activePiePoint.accommodation.toLocaleString()}개
-              </span>
+                </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -419,9 +414,15 @@ export function InfrastructureScatterPlot({
                 </p>
               </div>
               <div className="rounded-md bg-slate-50 border border-slate-100 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500 font-semibold">2025 숙박 소비액(Size)</p>
+                <p className="text-[10px] text-slate-500 font-semibold">숙박 소비액(크기)</p>
                 <p className="text-xs font-black text-slate-800">
                   {(activePiePoint.spending || 0).toLocaleString()}천원
+                </p>
+              </div>
+              <div className="rounded-md bg-slate-50 border border-slate-100 px-2 py-1.5">
+                <p className="text-[10px] text-slate-500 font-semibold">관광객 수(색)</p>
+                <p className="text-xs font-black text-slate-800">
+                  {(activePiePoint.visitors || 0).toLocaleString()}명
                 </p>
               </div>
             </div>

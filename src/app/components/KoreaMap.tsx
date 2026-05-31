@@ -64,7 +64,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
-      const heatmapColor = getHeatmapColorFromRatio(opportunityData[region.id]?.intensity);
+      const heatmapColor = getHeatmapColorFromRatio(opportunityData[region.id]?.opportunityScore*0.01);
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
 
@@ -74,10 +74,10 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
 
       // cond
       if (isHovered) {
-        strokeColor = "#c17aab"; 
-        strokeWidth = "3px";
+        strokeColor = "#ab418f"; 
+        strokeWidth = "2px";
       } else if (isSelected) {
-        strokeColor = "#c1907a";  
+        strokeColor = "#ab9241";  
         strokeWidth = "2px";
       }
 
@@ -130,7 +130,8 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
             {currentRegion.name} 입지 기회도
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {currentOpportunity?.opportunityScore.toFixed(3) ?? "-"}
+            {currentOpportunity?.opportunityScore.toFixed(1) ?? "-"}
+            <span className="text-base text-gray-500 font-medium ml-1">점</span>
           </p>
         </div>
       )}
@@ -158,8 +159,8 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>높음</span>
-            <span>낮음</span>
+            <span>100점 (최적)</span>
+            <span>0점</span>
           </div>
         </div>
       </div>

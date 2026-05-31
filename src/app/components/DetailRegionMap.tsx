@@ -104,7 +104,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
-      const heatmapColor = getHeatmapColorFromRatio(opportunityData[id]?.intensity);
+      const heatmapColor = getHeatmapColorFromRatio(opportunityData[id]?.opportunityScore*0.01);
       const isSelected = selectedSubRegion === id;
       const isCompareSelected = selectedCompareSubRegions.includes(id);
       const isHovered = activeHoveredSubRegion === id;
@@ -113,14 +113,14 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
       let strokeWidth = "0.5px";
 
       if (isHovered) {
-        strokeColor = "#c17aab"; 
-        strokeWidth = "3px";
+        strokeColor = "#ab418f"; 
+        strokeWidth = "2px";
       } else if (isCompareSelected) {
-        strokeColor = "#16a34a"; 
-        strokeWidth = "3px";
+        strokeColor = "#ab9241"; 
+        strokeWidth = "2px";
       } else if (isSelected) {
-        strokeColor = "#c1907a"; 
-        strokeWidth = "3px";
+        strokeColor = "#415aab"; 
+        strokeWidth = "2px";
       }
 
       styles += `
@@ -192,7 +192,8 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
             {currentRegionId ? subRegionMap[currentRegionId] : "구역을 선택하세요"}
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {currentOpportunity?.opportunityScore.toFixed(3) ?? "-"}
+            {currentOpportunity?.opportunityScore.toFixed(1) ?? "-"}
+            <span className="text-base text-gray-600 font-medium ml-1">점</span>
           </p>
         </div>
       </div>
@@ -210,7 +211,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
         {checkMarkers.map((marker) => (
           <div
             key={marker.id}
-            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
+            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ab9241] text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
             style={{ left: marker.x, top: marker.y }}
           >
             ✓
@@ -227,8 +228,8 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>높음</span>
-            <span>낮음</span>
+            <span>100점 (최적)</span>
+            <span>0점</span>
           </div>
         </div>
       </div>

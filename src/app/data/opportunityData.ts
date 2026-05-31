@@ -9,11 +9,11 @@ export type OpportunityDatum = {
   spendingTotal: number;
   accommodationTotal: number;
   landPriceTotal: number;
-  visitorZ: number;
-  spendingZ: number;
-  accommodationZ: number;
-  landPriceZ: number;
-  opportunityScore: number;
+  visitorT: number;       // 0~100점 
+  spendingT: number;      // 0~100점 
+  accommodationT: number; // 0~100점 
+  landPriceT: number;     // 0~100점 
+  opportunityScore: number; // 0~100점
   intensity: number;
 };
 
@@ -59,6 +59,13 @@ function parseCsvLine(line: string) {
 
 const parseNumber = (value: string | undefined) => Number(value?.replace(/,/g, "").trim()) || 0;
 
+// ▼ Z-score를 0~100 백분위 점수(T점수)로 변환
+function zToPercentileScore(z: number): number {
+  if (typeof z !== 'number' || isNaN(z)) return 50.0; 
+  const percentile = 1 / (1 + Math.exp(-1.702 * z));
+  return Math.round(percentile*1000) / 10;
+}
+
 function toOpportunityDatum(row: Record<string, string>): OpportunityDatum {
   return {
     provinceId: row.provinceId,
@@ -68,11 +75,15 @@ function toOpportunityDatum(row: Record<string, string>): OpportunityDatum {
     spendingTotal: parseNumber(row.spendingTotal),
     accommodationTotal: parseNumber(row.accommodationTotal),
     landPriceTotal: parseNumber(row.landPriceTotal),
-    visitorZ: parseNumber(row.visitorZ),
-    spendingZ: parseNumber(row.spendingZ),
-    accommodationZ: parseNumber(row.accommodationZ),
-    landPriceZ: parseNumber(row.landPriceZ),
-    opportunityScore: parseNumber(row.opportunityScore),
+    
+    //변환
+    visitorT: zToPercentileScore(parseNumber(row.visitorZ)),
+    spendingT: zToPercentileScore(parseNumber(row.spendingZ)),
+    accommodationT: zToPercentileScore(parseNumber(row.accommodationZ)),
+    landPriceT: zToPercentileScore(parseNumber(row.landPriceZ)),
+   
+    opportunityScore: zToPercentileScore(parseNumber(row.opportunityScore)),
+    
     intensity: parseNumber(row.intensity),
   };
 }
