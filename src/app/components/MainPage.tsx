@@ -1,29 +1,31 @@
-import { Check, ShoppingCart, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Check, ShoppingCart, Menu, X, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
 import { ComparePage } from "./ComparePage";
 import { MainSelectionRadarChart } from "./MainSelectionRadarChart";
-import { getDetailOpportunityScores, getMainOpportunityScores } from "../data/opportunityData";
+
+// 데이터 불러오기 및 변환 함수들
+import { 
+  getDetailOpportunityScores, 
+  getMainOpportunityScores, 
+  zToPercentileScore 
+} from "../data/opportunityData";
+import { 
+  getProvinceVisitorGrowthRates, 
+  getDistrictVisitorGrowthRates 
+} from "../data/visitorData";
 
 const regionsInfo = [
-  { id: "seoul", name: "서울" },
-  { id: "incheon", name: "인천" },
-  { id: "gyeonggi", name: "경기" },
-  { id: "gangwon", name: "강원" },
-  { id: "chungbuk", name: "충북" },
-  { id: "chungnam", name: "충남" },
-  { id: "sejong", name: "세종" },
-  { id: "daejeon", name: "대전" },
-  { id: "jeonbuk", name: "전북" },
-  { id: "jeonnam", name: "전남" },
-  { id: "gwangju", name: "광주" },
-  { id: "gyeongbuk", name: "경북" },
-  { id: "daegu", name: "대구" },
-  { id: "gyeongnam", name: "경남" },
-  { id: "ulsan", name: "울산" },
-  { id: "busan", name: "부산" },
+  { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
+  { id: "gyeonggi", name: "경기" }, { id: "gangwon", name: "강원" },
+  { id: "chungbuk", name: "충북" }, { id: "chungnam", name: "충남" },
+  { id: "sejong", name: "세종" }, { id: "daejeon", name: "대전" },
+  { id: "jeonbuk", name: "전북" }, { id: "jeonnam", name: "전남" },
+  { id: "gwangju", name: "광주" }, { id: "gyeongbuk", name: "경북" },
+  { id: "daegu", name: "대구" }, { id: "gyeongnam", name: "경남" },
+  { id: "ulsan", name: "울산" }, { id: "busan", name: "부산" },
   { id: "jeju", name: "제주" },
 ];
 
@@ -33,6 +35,15 @@ type CompareRegion = {
   provinceId: string;
   provinceName: string;
 };
+
+// 드래그 앤 드롭용 초기 평가 지표
+const INITIAL_METRICS = [
+  { id: "growth", label: "관광객 증감률", type: "positive" },
+  { id: "visitor", label: "관광객 규모", type: "positive" },
+  { id: "spending", label: "숙박 소비액", type: "positive" },
+  { id: "price", label: "평균 지가 (낮을수록 유리)", type: "negative" },
+  { id: "competition", label: "경쟁 숙박업소 수 (적을수록 유리)", type: "negative" },
+];
 
 function splitScatterPointId(id: string) {
   const [provinceId, ...subRegionParts] = id.split("-");
@@ -49,16 +60,110 @@ export function MainPage() {
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
+  
+  // UI 상태 관리
   const [isCompareMode, setIsCompareMode] = useState(false);
+  const [isRankOpen, setIsRankOpen] = useState(false); // 가중치 설정 패널 상태
   const [isCompareLaunching, setIsCompareLaunching] = useState(false);
   const [isCompareClosing, setIsCompareClosing] = useState(false);
   const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
 
-  const mainOpportunityData = useMemo(() => getMainOpportunityScores(), []);
-  const detailOpportunityData = useMemo(
-    () => getDetailOpportunityScores(currentViewLevel),
-    [currentViewLevel],
-  );
+  // 드래그 앤 드롭 상태 관리
+  const [metrics, setMetrics] = useState(INITIAL_METRICS);
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
+
+  const handleDragSort = () => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    const _metrics = [...metrics];
+    const draggedItemContent = _metrics.splice(dragItem.current, 1)[0];
+    _metrics.splice(dragOverItem.current, 0, draggedItemContent);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setMetrics(_metrics);
+  };
+
+  // 1. 순위에 따른 가중치 연산 (1위: 5/15, 2위: 4/15 ...)
+  const weightMap = useMemo(() => {
+    const w: Record<string, number> = {};
+    metrics.forEach((m, idx) => {
+      w[m.id] = (5 - idx) / 15;
+    });
+    return w;
+  }, [metrics]);
+
+  // 2. 동적 점수 계산 로직 
+  const calculateDynamicScores = useCallback((
+    baseData: Record<string, any> | undefined, 
+    growthRates: Record<string, number> | undefined
+  ) => {
+    const dynamicData: Record<string, any> = {};
+    if (!baseData) return dynamicData;
+    
+    const safeGrowthRates = growthRates || {};
+    
+    const dynamicWeightSumSq = Object.values(weightMap).reduce((sum, w) => sum + w * w, 0);
+    const adjustmentFactor = Math.sqrt(dynamicWeightSumSq) || 1;
+    
+    for (const [id, datum] of Object.entries(baseData)) {
+      if (!datum) continue;
+
+      const growth = safeGrowthRates[id] || 0;
+      const growthZ = growth / 0.15; 
+
+      // opportunityData.ts 에서 가져온 원본 Z-score
+      const visitorZ = datum.visitorZ ?? 0;
+      const spendingZ = datum.spendingZ ?? 0;
+      const priceZ = datum.landPriceZ ?? 0;
+      const compZ = datum.accommodationZ ?? 0;
+
+      // Z-score(-3~+3) 끼리 가중치를 곱해서 단순 합산 (부정 지표는 빼기)
+      const rawFinalZ = 
+        (weightMap["growth"] * growthZ) +
+        (weightMap["visitor"] * visitorZ) +
+        (weightMap["spending"] * spendingZ) -
+        (weightMap["price"] * priceZ) -
+        (weightMap["competition"] * compZ);
+
+      const finalZ = rawFinalZ / adjustmentFactor;
+
+      dynamicData[id] = {
+        ...datum,
+        growthZ: growthZ,
+        opportunityScore: zToPercentileScore(finalZ) 
+      };
+    }
+    return dynamicData;
+  }, [weightMap]);
+
+  // 3. 데이터 패치 및 메모이제이션
+  const provinceGrowthRates = useMemo(() => {
+    try {
+      return typeof getProvinceVisitorGrowthRates === 'function' ? getProvinceVisitorGrowthRates() : {};
+    } catch {
+      return {};
+    }
+  }, []);
+  
+  const districtGrowthRates = useMemo(() => {
+    try {
+      return typeof getDistrictVisitorGrowthRates === 'function' ? getDistrictVisitorGrowthRates(currentViewLevel) : {};
+    } catch {
+      return {};
+    }
+  }, [currentViewLevel]);
+
+  const dynamicMainOpportunityData = useMemo(() => {
+    const baseData = getMainOpportunityScores();
+    return calculateDynamicScores(baseData, provinceGrowthRates);
+  }, [calculateDynamicScores, provinceGrowthRates]);
+
+  const dynamicDetailOpportunityData = useMemo(() => {
+    const baseData = getDetailOpportunityScores(currentViewLevel);
+    return calculateDynamicScores(baseData, districtGrowthRates);
+  }, [currentViewLevel, calculateDynamicScores, districtGrowthRates]);
+
+  // 기타 UI 로직
   const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
   const compareScatterPointIds = useMemo(
     () => compareRegions.map((region) => `${region.provinceId}-${region.id}`),
@@ -111,7 +216,6 @@ export function MainPage() {
 
   const handleScatterHover = (item: { id: string } | null) => {
     if (currentViewLevel === "national") {
-      // 전국 뷰: 산점도 점 hover → 지도의 해당 광역 강조
       if (item) {
         const { provinceId } = splitScatterPointId(item.id);
         setHoveredRegion(provinceId);
@@ -121,7 +225,6 @@ export function MainPage() {
       setHoveredSubRegion(null);
       return;
     }
-
     const { provinceId, subRegionId } = item ? splitScatterPointId(item.id) : { provinceId: "", subRegionId: null };
     setHoveredSubRegion(provinceId === currentViewLevel ? subRegionId : null);
   };
@@ -143,12 +246,12 @@ export function MainPage() {
       toggleCompareRegion(subRegionId, item.name);
       return;
     }
-
     handleSubRegionSelect(subRegionId, item.name);
   };
 
   return (
     <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
+      {/* 우측 가장자리 숨김 화살표 (비교페이지 이동) */}
       <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
         <button
           type="button"
@@ -172,61 +275,122 @@ export function MainPage() {
         </div>
       )}
 
+      {/* 좌측 지도 패널 */}
       <div className="absolute left-[1.5%] top-1/2 -translate-y-1/2 w-[45.5%] h-[94%] bg-white rounded-2xl shadow-lg border-[0.5px] border-gray-200 overflow-hidden">
-        <div className="absolute right-5 top-5 z-40 flex flex-col items-end gap-3">
-          <button
-            type="button"
-            onClick={() => setIsCompareMode((prev) => !prev)}
-            className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
-              isCompareMode ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
-            }`}
-          >
-            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-[#8b5cf6]"}`} />
-            {compareRegions.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
-                {compareRegions.length}
-              </span>
-            )}
-          </button>
+        
+        {/* 상단 우측 플로팅 버튼 그룹 (우선순위 설정 + 장바구니) */}
+        <div className="absolute right-5 top-5 z-40 flex items-start gap-3">
+          
+          {/* 1. 평가 지표 우선순위 설정 위젯 */}
+          <div className="relative flex flex-col items-end">
+            <button
+              type="button"
+              onClick={() => setIsRankOpen((prev) => !prev)}
+              className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+                isRankOpen ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
+              }`}
+              title="평가 지표 가중치 설정"
+            >
+              <SlidersHorizontal className={`w-6 h-6 ${isRankOpen ? "text-white" : "text-[#8b5cf6]"}`} />
+            </button>
 
-          {isCompareMode && (
-            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-3">
-              <div className="flex justify-end mb-2">
-                <span className="text-[11px] font-bold text-[#8b5cf6] bg-[#8b5cf6]/10 px-2 py-0.5 rounded-full">
-                  {compareRegions.length}/3
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {compareRegions.length === 0 ? (
-                  <p className="text-[11px] text-gray-500 leading-4">지도에서 선택</p>
-                ) : (
-                  compareRegions.map((region) => (
-                    <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
-                      <Check className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
-                        <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+            {isRankOpen && (
+              <div className="absolute top-16 right-0 w-64 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-4">
+                <div className="flex justify-between items-center mb-1">
+                  <h4 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                    🎯 평가 지표 우선순위
+                  </h4>
+                  <button onClick={() => setIsRankOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-500 mb-3 leading-snug">
+                  드래그하여 중요도를 변경하면 점수가 실시간으로 재계산됩니다.
+                </p>
+                <div className="space-y-2">
+                  {metrics.map((metric, index) => (
+                    <div
+                      key={metric.id}
+                      draggable
+                      onDragStart={() => (dragItem.current = index)}
+                      onDragEnter={() => (dragOverItem.current = index)}
+                      onDragEnd={handleDragSort}
+                      onDragOver={(e) => e.preventDefault()}
+                      className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-2 cursor-grab active:cursor-grabbing hover:border-[#8b5cf6] transition-colors group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Menu className="w-4 h-4 text-gray-400 group-hover:text-[#8b5cf6] shrink-0" />
+                        <div className="flex items-center justify-center w-5 h-5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6] text-[10px] font-bold shrink-0">
+                          {index + 1}
+                        </div>
+                        <span className="text-xs font-semibold text-gray-700 truncate">{metric.label}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeCompareRegion(region.id);
-                        }}
-                        className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                        aria-label={`${region.name} 비교 지역에서 제거`}
-                        title="비교 지역에서 제거"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">
+                        {Math.round(weightMap[metric.id] * 100)}%
+                      </span>
                     </div>
-                  ))
-                )}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* 2. 장바구니 위젯 */}
+          <div className="relative flex flex-col items-end">
+            <button
+              type="button"
+              onClick={() => setIsCompareMode((prev) => !prev)}
+              className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+                isCompareMode ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
+              }`}
+              title="비교 모드 켜기/끄기"
+            >
+              <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-[#8b5cf6]"}`} />
+              {compareRegions.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
+                  {compareRegions.length}
+                </span>
+              )}
+            </button>
+
+            {isCompareMode && (
+              <div className="absolute top-16 right-0 w-44 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-3">
+                <div className="flex justify-end mb-2">
+                  <span className="text-[11px] font-bold text-[#8b5cf6] bg-[#8b5cf6]/10 px-2 py-0.5 rounded-full">
+                    {compareRegions.length}/3
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {compareRegions.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 leading-4 text-center py-2">지도에서 선택하세요</p>
+                  ) : (
+                    compareRegions.map((region) => (
+                      <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                        <Check className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
+                          <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeCompareRegion(region.id);
+                          }}
+                          className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
+        {/* 지도 렌더링 영역 */}
         {currentViewLevel === "national" ? (
           <KoreaMap
             onRegionClick={(id) => {
@@ -241,7 +405,7 @@ export function MainPage() {
             }}
             selectedRegion={selectedRegion}
             externalHoveredRegion={hoveredRegion}
-            opportunityData={mainOpportunityData}
+            opportunityData={dynamicMainOpportunityData}
           />
         ) : (
           <DetailRegionMap
@@ -250,7 +414,7 @@ export function MainPage() {
               setCurrentViewLevel("national");
               resetSubRegionState();
             }}
-            opportunityData={detailOpportunityData}
+            opportunityData={dynamicDetailOpportunityData}
             onSubRegionClick={handleSubRegionSelect}
             onSubRegionHover={setHoveredSubRegion}
             selectedSubRegion={selectedSubRegion}
@@ -260,6 +424,7 @@ export function MainPage() {
         )}
       </div>
 
+      {/* 우측 산점도 및 레이더 차트 패널 */}
       <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
         <div className={`${compareRegions.length > 0 ? "flex-[1.35]" : "flex-1"} min-h-0 relative`}>
           <InfrastructureScatterPlot
@@ -272,6 +437,7 @@ export function MainPage() {
             regionsInfo={regionsInfo}
             selectedComparePointIds={compareScatterPointIds}
             isCompareMode={isCompareMode}
+            weightMap={weightMap}
             onDataPointHover={handleScatterHover}
             onDataPointClick={handleScatterClick}
           />

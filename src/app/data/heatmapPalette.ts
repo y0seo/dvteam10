@@ -1,15 +1,15 @@
 // Green opportunity heatmap palette (10 steps) — lightest → darkest green
 export const HEATMAP_PALETTE = [
-  "#f7fcf5", // 0  
-  "#e5f5e0", // 1  
-  "#c7e9c0", // 2  
-  "#a1d99b", // 3  
-  "#74c476", // 4  
-  "#41ab5d", // 5 
-  "#238b45", // 6  
-  "#006d2c", // 7 
-  "#005a32", // 8 
-  "#00441b", // 9 
+  "#f3faf3", // 0
+  "#e2f3e2", // 1
+  "#cde8cd", // 2
+  "#b4dbb4", // 3
+  "#8fc98f", // 4
+  "#5FB35F", // 5 (center)
+  "#4b9d4b", // 6
+  "#388738", // 7
+  "#286f28", // 8
+  "#184f18", // 9
 ] as const;
 
 // Missing data

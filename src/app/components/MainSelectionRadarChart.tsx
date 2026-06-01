@@ -77,7 +77,6 @@ export function MainSelectionRadarChart({ selectedRegions }: MainSelectionRadarC
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-gray-800">정규화 레이더 비교</h3>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-[11px] font-semibold">
-            <span className="text-gray-500">장바구니 선택 지역 기준:</span>
             {comparisonRows.map((row, index) => (
               <span key={row.region.id} className="flex items-center gap-1">
                 {index > 0 && <span className="text-gray-400">vs</span>}

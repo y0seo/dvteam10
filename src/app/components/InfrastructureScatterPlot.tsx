@@ -19,12 +19,11 @@ import {
 } from "recharts";
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
 import {
-  getAllDistrictGrowthRates,
+  getDistrictVisitorGrowthRates,
   getDistrictVisitorTotals,
-  provinceIdToCsvName,
 } from "../data/visitorData";
 import { getAccommodationSpending } from "../data/comparisonData";
-import { getDetailOpportunityScores } from "../data/opportunityData";
+import { getDetailOpportunityScores, zToPercentileScore } from "../data/opportunityData";
 
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
@@ -36,28 +35,31 @@ interface InfrastructureScatterPlotProps {
   regionsInfo: { id: string; name: string }[];
   selectedComparePointIds?: string[];
   isCompareMode?: boolean;
+  // ✅ 메인 페이지에서 조작한 가중치를 받아오기 위한 Prop 추가
+  weightMap?: Record<string, number>; 
   onDataPointClick?: (item: ScatterDataItem) => void;
   onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
 // stroke: dusty amber 톤 (ATOM 스타일 — 비비드 자제)
-const HOVERED_POINT_COLOR = "#fbbf24"; // amber-400 — 부드러운 황금
+const HOVERED_POINT_COLOR = "#ab418f"; // amber-400 — 부드러운 황금
 const SELECTED_POINT_COLOR = "#d97706"; // amber-600 — 진한 황금 (차분)
 const GLOW_COLOR = "#fef3c7"; // amber-100 — 매우 옅은 후광
 // 장바구니: muted violet (lavender 톤)
 const COMPARE_SELECTED_COLOR = "#8b5cf6"; // violet-500 (한 단계 옅게)
 
 // 산점도 점 색상 (관광객 수 intensity) — stone gradient (warm gray, 노랑 stroke과 조화)
-// 8단계로 늘리고 끝 색을 더 진하게 → intensity 단계 시각화 강화
 const SCATTER_PALETTE = [
-  "#e7e5e4", // stone-200 (옅음)
-  "#d6d3d1", // stone-300
-  "#a8a29e", // stone-400
-  "#78716c", // stone-500
-  "#57534e", // stone-600
-  "#44403c", // stone-700
-  "#292524", // stone-800
-  "#1c1917", // stone-900 (거의 검정)
+   "#f5f4f9", // 0
+  "#e8e5f0", // 1
+  "#d9d4e5", // 2
+  "#c7c2d9", // 3
+  "#b3adc9", // 4
+  "#9c96b7", // 5
+  "#857ea5", // 6
+  "#6E5FB3", // 7 (base)
+  "#584b8f", // 8
+  "#43386b", // 9
 ];
 
 function getScatterColor(value: number, max: number): string {
@@ -208,7 +210,6 @@ function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[
   let scatter: ExtendedScatterDataItem[] = [];
 
   regionsInfo.forEach((region) => {
-    
     const data = getDistrictVisitorTotals(region.id) || {};
     Object.entries(data).forEach(([districtName, value]) => {
       visitors[`${region.id}-${districtName}`] = value;
@@ -245,7 +246,6 @@ function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[
   cachedMaxAccommodation = Math.ceil(Math.max(...scatter.map(s => s.accommodation), 1) * 1.05);
   cachedMaxSpending = Math.max(...scatter.map(s => s.spending), 1);
 
-  // 전국 시군구 기준 선형 회귀선 1회 계산
   const regressionPoints = scatter
     .filter((item) => item.price > 0 && item.accommodation >= 0)
     .map((item) => ({ x: item.price, y: item.accommodation }));
@@ -314,7 +314,7 @@ function HighlightedScatterPoint({
         cy={cy}
         r={radius}
         fill={fill}
-        fillOpacity={isDimmed ? 1 : 0.92}
+        fillOpacity={isDimmed ? 1 : 0.8}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
         opacity={isDimmed ? 0.18 : 1}
@@ -352,6 +352,7 @@ export function InfrastructureScatterPlot({
   regionsInfo,
   selectedComparePointIds = [],
   isCompareMode = false,
+  weightMap, // 메인 페이지로부터 가중치를 받아옴
   onDataPointClick,
   onDataPointHover,
   hoveredSubRegion,
@@ -415,7 +416,6 @@ export function InfrastructureScatterPlot({
         .map((entry) => {
           const isChartHovered = hoveredPoint?.id === entry.id;
           const isMapHovered = hoveredSubRegion ? entry.id === `${selectedRegion}-${hoveredSubRegion}` : false;
-          // 전국 뷰: 광역 hover 시 해당 광역의 모든 시군구 점 강조
           const isProvinceHovered = hoveredProvinceId
             ? entry.id.startsWith(`${hoveredProvinceId}-`)
             : false;
@@ -437,8 +437,6 @@ export function InfrastructureScatterPlot({
             isDimmed: hasHoveredPoint && !isHovered && !isSelected && !isCompareSelected,
           };
         })
-        // 강조된 점을 뒤(=위)에 그려서 겹친 점 뒤에 가려지지 않게:
-        // 일반 < hovered < selected < 장바구니 선택
         .sort((a, b) => {
           const rank = (item: { isCompareSelected: boolean; highlightState: "selected" | "hovered" | null }) => {
             if (item.isCompareSelected) return 3;
@@ -479,26 +477,48 @@ export function InfrastructureScatterPlot({
     return activePiePoint.name;
   }, [activePiePoint, regionsInfo]);
 
+  // ✅ 툴팁용 메타 데이터 실시간 연산 로직
   const activePointMeta = useMemo(() => {
     if (!activePiePoint) return null;
     const idParts = activePiePoint.id.split("-");
     const provinceId = idParts[0];
-    const provinceCsvName = provinceIdToCsvName[provinceId];
     const districtName = activePiePoint.name;
 
-    const growthRates = getAllDistrictGrowthRates();
-    const growthRate = provinceCsvName
-      ? growthRates[`${provinceCsvName}|${districtName}`]
-      : undefined;
+    const growthRates = getDistrictVisitorGrowthRates(provinceId);
+    const growthRate = growthRates[districtName] || 0;
 
     const opportunityScores = getDetailOpportunityScores(provinceId);
-    const opportunity = opportunityScores[districtName];
+    const datum = opportunityScores[districtName];
+
+    let finalOpportunityScore = datum?.opportunityScore || 0;
+
+    // 만약 MainPage에서 weightMap을 넘겨주었다면 산점도 툴팁에서도 실시간 동적 계산
+    if (datum && weightMap && Object.keys(weightMap).length > 0) {
+      const growthZ = growthRate / 0.15;
+      const visitorZ = datum.visitorZ ?? 0;
+      const spendingZ = datum.spendingZ ?? 0;
+      const priceZ = datum.landPriceZ ?? 0;
+      const compZ = datum.accommodationZ ?? 0;
+
+      const dynamicWeightSumSq = Object.values(weightMap).reduce((sum, w) => sum + w * w, 0);
+      const adjustmentFactor = Math.sqrt(dynamicWeightSumSq) || 1;
+
+      const rawFinalZ =
+        (weightMap["growth"] * growthZ) +
+        (weightMap["visitor"] * visitorZ) +
+        (weightMap["spending"] * spendingZ) -
+        (weightMap["price"] * priceZ) -
+        (weightMap["competition"] * compZ);
+
+      const finalZ = rawFinalZ / adjustmentFactor;
+      finalOpportunityScore = zToPercentileScore(finalZ);
+    }
 
     return {
       growthRate,
-      opportunityScore: opportunity?.opportunityScore,
+      opportunityScore: finalOpportunityScore,
     };
-  }, [activePiePoint]);
+  }, [activePiePoint, weightMap]);
 
   const handlePointHover = (item: ScatterDataItem | null) => {
     setHoveredPoint(item);

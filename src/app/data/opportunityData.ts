@@ -9,11 +9,21 @@ export type OpportunityDatum = {
   spendingTotal: number;
   accommodationTotal: number;
   landPriceTotal: number;
-  visitorT: number;       // 0~100점 
-  spendingT: number;      // 0~100점 
-  accommodationT: number; // 0~100점 
-  landPriceT: number;     // 0~100점 
-  opportunityScore: number; // 0~100점
+  
+  // 1. 원본 Z-score (MainPage의 동적 가중치 연산을 위한 핵심 재료)
+  visitorZ: number;
+  spendingZ: number;
+  accommodationZ: number;
+  landPriceZ: number;
+
+  // 2. 개별 지표의 0~100점 환산 점수 (툴팁 등 UI 표기용)
+  visitorT: number;      
+  spendingT: number;     
+  accommodationT: number; 
+  landPriceT: number;     
+  
+  // 3. 최종 입지기회도 (MainPage에서 실시간 계산하여 덮어씌움)
+  opportunityScore: number; 
   intensity: number;
 };
 
@@ -52,21 +62,25 @@ function parseCsvLine(line: string) {
       current += char;
     }
   }
-
   result.push(current);
   return result;
 }
 
 const parseNumber = (value: string | undefined) => Number(value?.replace(/,/g, "").trim()) || 0;
 
-// ▼ Z-score를 0~100 백분위 점수(T점수)로 변환
-function zToPercentileScore(z: number): number {
+// Z-score를 0~100 백분위 점수(T점수)로 변환하는 범용 함수
+export function zToPercentileScore(z: number): number {
   if (typeof z !== 'number' || isNaN(z)) return 50.0; 
   const percentile = 1 / (1 + Math.exp(-1.702 * z));
-  return Math.round(percentile*1000) / 10;
+  return Math.round(percentile * 1000) / 10;
 }
 
 function toOpportunityDatum(row: Record<string, string>): OpportunityDatum {
+  const visitorZ = parseNumber(row.visitorZ);
+  const spendingZ = parseNumber(row.spendingZ);
+  const accommodationZ = parseNumber(row.accommodationZ);
+  const landPriceZ = parseNumber(row.landPriceZ);
+
   return {
     provinceId: row.provinceId,
     provinceName: row.provinceName,
@@ -76,13 +90,20 @@ function toOpportunityDatum(row: Record<string, string>): OpportunityDatum {
     accommodationTotal: parseNumber(row.accommodationTotal),
     landPriceTotal: parseNumber(row.landPriceTotal),
     
-    //변환
-    visitorT: zToPercentileScore(parseNumber(row.visitorZ)),
-    spendingT: zToPercentileScore(parseNumber(row.spendingZ)),
-    accommodationT: zToPercentileScore(parseNumber(row.accommodationZ)),
-    landPriceT: zToPercentileScore(parseNumber(row.landPriceZ)),
-   
-    opportunityScore: zToPercentileScore(parseNumber(row.opportunityScore)),
+    // 원본 데이터 그대로 패스
+    visitorZ,
+    spendingZ,
+    accommodationZ,
+    landPriceZ,
+    
+    // 개별 지표 퍼센트 변환 (부정 지표 부호 반전)
+    visitorT: zToPercentileScore(visitorZ),
+    spendingT: zToPercentileScore(spendingZ),
+    accommodationT: zToPercentileScore(-accommodationZ), 
+    landPriceT: zToPercentileScore(-landPriceZ),         
+    
+    // 💡 더 이상 여기서 합산 연산을 하지 않음! (MainPage에서 덮어씌울 초기값 0 세팅)
+    opportunityScore: 0,
     
     intensity: parseNumber(row.intensity),
   };
