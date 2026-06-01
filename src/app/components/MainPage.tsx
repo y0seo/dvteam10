@@ -44,7 +44,7 @@ function splitScatterPointId(id: string) {
 
 export function MainPage() {
   const [currentViewLevel, setCurrentViewLevel] = useState<string>("national");
-  const [selectedRegion, setSelectedRegion] = useState<string>("seoul");
+  const [selectedRegion, setSelectedRegion] = useState<string>("");
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
@@ -111,6 +111,13 @@ export function MainPage() {
 
   const handleScatterHover = (item: { id: string } | null) => {
     if (currentViewLevel === "national") {
+      // 전국 뷰: 산점도 점 hover → 지도의 해당 광역 강조
+      if (item) {
+        const { provinceId } = splitScatterPointId(item.id);
+        setHoveredRegion(provinceId);
+      } else {
+        setHoveredRegion(null);
+      }
       setHoveredSubRegion(null);
       return;
     }
@@ -147,9 +154,9 @@ export function MainPage() {
           type="button"
           onClick={goToComparePage}
           disabled={compareRegions.length < 2}
-          className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-[#ab9241] disabled:opacity-35 disabled:hover:border-gray-200 disabled:cursor-not-allowed"
+          className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-[#8b5cf6] disabled:opacity-35 disabled:hover:border-gray-200 disabled:cursor-not-allowed"
         >
-          <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-[#ab9241] transition-transform group-hover:-translate-x-0.5" />
+          <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-[#8b5cf6] transition-transform group-hover:-translate-x-0.5" />
         </button>
       </div>
 
@@ -171,10 +178,10 @@ export function MainPage() {
             type="button"
             onClick={() => setIsCompareMode((prev) => !prev)}
             className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
-              isCompareMode ? "bg-[#ab9241] border-[#ab9241]" : "bg-white border-gray-200 hover:border-[#ab9241]"
+              isCompareMode ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
             }`}
           >
-            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-[#ab9241]"}`} />
+            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-[#8b5cf6]"}`} />
             {compareRegions.length > 0 && (
               <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
                 {compareRegions.length}
@@ -183,9 +190,9 @@ export function MainPage() {
           </button>
 
           {isCompareMode && (
-            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#ab9241]/20 p-3">
+            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-3">
               <div className="flex justify-end mb-2">
-                <span className="text-[11px] font-bold text-[#ab9241] bg-[#ab9241]/10 px-2 py-0.5 rounded-full">
+                <span className="text-[11px] font-bold text-[#8b5cf6] bg-[#8b5cf6]/10 px-2 py-0.5 rounded-full">
                   {compareRegions.length}/3
                 </span>
               </div>
@@ -195,7 +202,7 @@ export function MainPage() {
                 ) : (
                   compareRegions.map((region) => (
                     <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
-                      <Check className="w-3.5 h-3.5 text-[#ab9241] shrink-0" />
+                      <Check className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
                         <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
@@ -233,7 +240,7 @@ export function MainPage() {
               setCurrentViewLevel(id);
             }}
             selectedRegion={selectedRegion}
-            hoveredRegion={hoveredRegion}
+            externalHoveredRegion={hoveredRegion}
             opportunityData={mainOpportunityData}
           />
         ) : (
@@ -261,6 +268,7 @@ export function MainPage() {
             selectedSubRegion={selectedSubRegion}
             selectedSubRegionName={selectedSubRegionName}
             hoveredSubRegion={hoveredSubRegion}
+            hoveredProvinceId={currentViewLevel === "national" ? hoveredRegion : null}
             regionsInfo={regionsInfo}
             selectedComparePointIds={compareScatterPointIds}
             isCompareMode={isCompareMode}

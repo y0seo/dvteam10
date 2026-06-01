@@ -207,6 +207,51 @@ export function getAllDistrictVisitorTotals(
     .filter((row) => row.total > 0);
 }
 
+// 6. 전국 시군구별 YoY 성장률 (rolling 12개월 vs 직전 12개월)
+//    key: `${provinceName}|${districtName}`
+//    value: (recent12sum / prev12sum) - 1, 분모 0이면 (recent>0 ? 1 : 0)
+let cachedGrowthRates: Record<string, number> | null = null;
+export function getAllDistrictGrowthRates(): Record<string, number> {
+  if (cachedGrowthRates) return cachedGrowthRates;
+
+  const months = [...new Set(visitorRows.map((row) => row.month))].sort();
+  if (months.length < 24) {
+    cachedGrowthRates = {};
+    return cachedGrowthRates;
+  }
+
+  const recentMonths = new Set(months.slice(-12));
+  const prevMonths = new Set(months.slice(-24, -12));
+
+  const sumsRecent: Record<string, number> = {};
+  const sumsPrev: Record<string, number> = {};
+
+  for (const row of visitorRows) {
+    if (!row.districtName) continue;
+    const key = `${row.provinceName}|${row.districtName}`;
+    if (recentMonths.has(row.month)) {
+      sumsRecent[key] = (sumsRecent[key] || 0) + row.districtVisitors;
+    } else if (prevMonths.has(row.month)) {
+      sumsPrev[key] = (sumsPrev[key] || 0) + row.districtVisitors;
+    }
+  }
+
+  const result: Record<string, number> = {};
+  const allKeys = new Set([...Object.keys(sumsRecent), ...Object.keys(sumsPrev)]);
+  for (const key of allKeys) {
+    const prev = sumsPrev[key] || 0;
+    const recent = sumsRecent[key] || 0;
+    if (prev === 0) {
+      result[key] = recent > 0 ? 1 : 0;
+    } else {
+      result[key] = recent / prev - 1;
+    }
+  }
+
+  cachedGrowthRates = result;
+  return result;
+}
+
 export function getProvinceVisitorScaleMax() {
   const totals = getProvinceVisitorTotals();
   return Math.max(...Object.values(totals), 1);

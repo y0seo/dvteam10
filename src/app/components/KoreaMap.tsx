@@ -10,9 +10,10 @@ import type { OpportunityDatum } from "../data/opportunityData";
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
   onRegionHover: (region: string | null) => void;
-  onRegionDoubleClick: (region: string) => void; 
+  onRegionDoubleClick: (region: string) => void;
   selectedRegion: string | null;
   opportunityData: Record<string, OpportunityDatum>;
+  externalHoveredRegion?: string | null;
 }
 
 const regionsInfo = [
@@ -27,12 +28,18 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData, externalHoveredRegion }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
 
-  
+  // 외부에서 hover 트리거 (산점도 → 지도 cross-highlight)
+  useEffect(() => {
+    if (externalHoveredRegion !== undefined) {
+      setHoveredRegion(externalHoveredRegion);
+    }
+  }, [externalHoveredRegion]);
+
   useEffect(() => {
     if (KoreaMapSvgRaw) {
       const responsiveSvg = KoreaMapSvgRaw
@@ -124,7 +131,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       <style>{dynamicStyles}</style>
 
       {/* 정보창 상단 팝업 */}
-      {currentRegion && (
+      {currentRegion ? (
         <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
             {currentRegion.name} 입지 기회도
@@ -132,6 +139,12 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
           <p className="text-3xl font-black text-blue-600 tracking-tight">
             {currentOpportunity?.opportunityScore.toFixed(1) ?? "-"}
             <span className="text-base text-gray-500 font-medium ml-1">점</span>
+          </p>
+        </div>
+      ) : (
+        <div className="absolute top-6 left-6 bg-white/85 px-5 py-4 rounded-xl shadow-md border border-gray-200 pointer-events-none z-20 backdrop-blur-md">
+          <p className="text-sm font-semibold text-gray-500">
+            클릭으로 입지기회도를 확인하세요
           </p>
         </div>
       )}

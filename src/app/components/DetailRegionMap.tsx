@@ -116,7 +116,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
         strokeColor = "#ab418f"; 
         strokeWidth = "2px";
       } else if (isCompareSelected) {
-        strokeColor = "#ab9241"; 
+        strokeColor = "#8b5cf6"; 
         strokeWidth = "2px";
       } else if (isSelected) {
         strokeColor = "#415aab"; 
@@ -211,7 +211,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
         {checkMarkers.map((marker) => (
           <div
             key={marker.id}
-            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ab9241] text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
+            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#8b5cf6] text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
             style={{ left: marker.x, top: marker.y }}
           >
             ✓
