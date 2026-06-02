@@ -33,7 +33,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
 
-  // 외부에서 hover 트리거 (산점도 → 지도 cross-highlight)
   useEffect(() => {
     if (externalHoveredRegion !== undefined) {
       setHoveredRegion(externalHoveredRegion);
@@ -79,12 +78,12 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
 
-      // cond
+      // COLOR
       if (isHovered) {
         strokeColor = "#ab418f"; 
         strokeWidth = "2px";
       } else if (isSelected) {
-        strokeColor = "#ab9241";  
+        strokeColor = "#ab418f";  
         strokeWidth = "2px";
       }
 

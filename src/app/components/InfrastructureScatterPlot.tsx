@@ -3,7 +3,6 @@ import {
   useState,
   useEffect,
   useRef,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   CartesianGrid,
@@ -18,12 +17,8 @@ import {
   ZAxis,
 } from "recharts";
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
-import {
-  getDistrictVisitorGrowthRates,
-  getDistrictVisitorTotals,
-} from "../data/visitorData";
+import { getDistrictVisitorTotals, provinceIdToCsvName } from "../data/visitorData";
 import { getAccommodationSpending } from "../data/comparisonData";
-import { getDetailOpportunityScores, zToPercentileScore } from "../data/opportunityData";
 
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
@@ -35,36 +30,24 @@ interface InfrastructureScatterPlotProps {
   regionsInfo: { id: string; name: string }[];
   selectedComparePointIds?: string[];
   isCompareMode?: boolean;
-  // ✅ 메인 페이지에서 조작한 가중치를 받아오기 위한 Prop 추가
-  weightMap?: Record<string, number>; 
+  dynamicAllDetailOpportunityData?: Record<string, any>; 
   onDataPointClick?: (item: ScatterDataItem) => void;
   onDataPointHover?: (item: ScatterDataItem | null) => void;
 }
 
-// stroke: dusty amber 톤 (ATOM 스타일 — 비비드 자제)
-const HOVERED_POINT_COLOR = "#ab418f"; // amber-400 — 부드러운 황금
-const SELECTED_POINT_COLOR = "#d97706"; // amber-600 — 진한 황금 (차분)
-const GLOW_COLOR = "#fef3c7"; // amber-100 — 매우 옅은 후광
-// 장바구니: muted violet (lavender 톤)
-const COMPARE_SELECTED_COLOR = "#8b5cf6"; // violet-500 (한 단계 옅게)
+const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
 
-// 산점도 점 색상 (관광객 수 intensity) — stone gradient (warm gray, 노랑 stroke과 조화)
+const HOVERED_POINT_COLOR = "#483777"; 
+const SELECTED_POINT_COLOR = "#483777";
+const GLOW_COLOR = "#ffffff00"; 
+
 const SCATTER_PALETTE = [
-   "#f5f4f9", // 0
-  "#e8e5f0", // 1
-  "#d9d4e5", // 2
-  "#c7c2d9", // 3
-  "#b3adc9", // 4
-  "#9c96b7", // 5
-  "#857ea5", // 6
-  "#6E5FB3", // 7 (base)
-  "#584b8f", // 8
-  "#43386b", // 9
+  "#d0c8ec", "#c2b7e5", "#b4a6de", "#a695d7", "#9884d0",
+  "#8a73c9", "#7c62c2", "#6E5FB3", "#5b4a95", "#483777",
 ];
 
 function getScatterColor(value: number, max: number): string {
   if (max <= 0 || value <= 0) return SCATTER_PALETTE[0];
-  // sqrt 변환으로 낮은 값도 잘 구분되게 (long-tail 완화)
   const ratio = Math.sqrt(Math.min(value / max, 1));
   const index = Math.min(
     Math.floor(ratio * SCATTER_PALETTE.length),
@@ -81,6 +64,7 @@ type ExtendedScatterDataItem = ScatterDataItem & {
 type HighlightedScatterPointPayload = ExtendedScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
   isCompareSelected?: boolean;
+  compareIndex?: number; 
   isDimmed?: boolean;
 };
 
@@ -103,7 +87,6 @@ let cachedMaxAccommodation = 1;
 let cachedMaxSpending = 1;
 let cachedRegression: { slope: number; intercept: number } = { slope: 0, intercept: 0 };
 
-// 선형 회귀선 (OLS) — y = slope·x + intercept
 function linearRegression(points: { x: number; y: number }[]): { slope: number; intercept: number } {
   const n = points.length;
   if (n < 2) return { slope: 0, intercept: 0 };
@@ -120,7 +103,6 @@ function linearRegression(points: { x: number; y: number }[]): { slope: number; 
   return { slope, intercept };
 }
 
-// 추세선 + Blue/Red Ocean 영역 (회귀선 아래=Blue, 위=Red)
 function RegressionShading(props: {
   xAxisMap?: Record<string, { scale: (v: number) => number; domain: [number, number] }>;
   yAxisMap?: Record<string, { scale: (v: number) => number; domain: [number, number] }>;
@@ -147,19 +129,16 @@ function RegressionShading(props: {
 
   return (
     <g pointerEvents="none">
-      {/* Blue Ocean (회귀선 아래 — 지가 대비 숙박 적음 = 기회) */}
       <polygon
         points={`${px1},${pyBottom} ${px1},${py1} ${px2},${py2} ${px2},${pyBottom}`}
         fill="#3b82f6"
         opacity={0.06}
       />
-      {/* Red Ocean (회귀선 위 — 지가 대비 숙박 많음 = 포화) */}
       <polygon
         points={`${px1},${pyTop} ${px1},${py1} ${px2},${py2} ${px2},${pyTop}`}
         fill="#ef4444"
         opacity={0.06}
       />
-      {/* 추세선 (점선) */}
       <line
         x1={px1}
         y1={py1}
@@ -169,7 +148,6 @@ function RegressionShading(props: {
         strokeWidth={1.5}
         strokeDasharray="6 4"
       />
-      {/* 영역 라벨 — 점이 몰리는 좌하단 피해서 Blue는 우하단으로 */}
       <text x={px2 - 8} y={pyBottom - 8} textAnchor="end" fontSize={10} fontWeight={700} fill="#3b82f6" opacity={0.7}>
         Blue Ocean
       </text>
@@ -180,7 +158,6 @@ function RegressionShading(props: {
   );
 }
 
-// 성장률 ▲(빨강 상승) / ▼(파랑 하락) 아이콘
 function GrowthIndicator({ rate }: { rate: number }) {
   const percent = Math.round(rate * 100);
   const threshold = 0.01;
@@ -271,13 +248,26 @@ function HighlightedScatterPoint({
   const highlightState = payload?.highlightState;
   const isSelected = highlightState === "selected";
   const isHovered = highlightState === "hovered";
+  const isCompareSelected = payload?.isCompareSelected;
+  const compareIndex = payload?.compareIndex ?? -1;
   const isDimmed = Boolean(payload?.isDimmed);
   
   const baseRadius = size ? Math.sqrt(size) : 5;
-  const radius = isSelected || isHovered ? baseRadius + 3 : baseRadius; 
+  const radius = baseRadius; 
   
-  const strokeColor = isSelected ? SELECTED_POINT_COLOR : isHovered ? HOVERED_POINT_COLOR : "#b3b3b33a";
-  const strokeWidth = isSelected || isHovered ? 3 : 1.5;
+  let strokeColor = "#b3b3b33a";
+  let strokeWidth = 1.5;
+
+  if (isCompareSelected && compareIndex >= 0) {
+    strokeColor = REGION_COLORS[compareIndex % REGION_COLORS.length];
+    strokeWidth = 3;
+  } else if (isSelected) {
+    strokeColor = SELECTED_POINT_COLOR;
+    strokeWidth = 3;
+  } else if (isHovered) {
+    strokeColor = HOVERED_POINT_COLOR;
+    strokeWidth = 2;
+  }
 
   return (
     <g
@@ -296,18 +286,18 @@ function HighlightedScatterPoint({
         onPointHover?.(null);
       }}
     >
-      <circle cx={cx} cy={cy} r={radius + 10} fill="#ffffff" opacity={0} pointerEvents="all" />
-      {(isSelected || isHovered) && (
+      {(isSelected || isCompareSelected) && (
         <circle
           cx={cx}
           cy={cy}
-          r={radius + 4}
+          r={radius + 2}
           fill="none"
-          stroke={GLOW_COLOR}
+          stroke={isCompareSelected ? strokeColor : GLOW_COLOR}
           strokeWidth={5}
           opacity={0.3}
         />
       )}
+      
       <circle
         className={`scatter-dot-${payload?.id}`}
         cx={cx}
@@ -317,31 +307,8 @@ function HighlightedScatterPoint({
         fillOpacity={isDimmed ? 1 : 0.8}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
-        opacity={isDimmed ? 0.18 : 1}
+        opacity={isDimmed ? 0.2 : 0.8}
       />
-      {payload?.isCompareSelected && (
-        <g pointerEvents="none">
-          <circle
-            cx={cx}
-            cy={cy}
-            r={Math.max(radius + 6, 12)}
-            fill={COMPARE_SELECTED_COLOR}
-            stroke="#ffffff"
-            strokeWidth={2}
-          />
-          <text
-            x={cx}
-            y={cy + 0.7}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={Math.max(radius + 5, 13)}
-            fontWeight={900}
-            fill="#ffffff"
-          >
-            ✓
-          </text>
-        </g>
-      )}
     </g>
   );
 }
@@ -352,7 +319,7 @@ export function InfrastructureScatterPlot({
   regionsInfo,
   selectedComparePointIds = [],
   isCompareMode = false,
-  weightMap, // 메인 페이지로부터 가중치를 받아옴
+  dynamicAllDetailOpportunityData,
   onDataPointClick,
   onDataPointHover,
   hoveredSubRegion,
@@ -368,7 +335,6 @@ export function InfrastructureScatterPlot({
   const [clickedPointId, setClickedPointId] = useState<string | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     setClickedPointId(null);
@@ -391,21 +357,6 @@ export function InfrastructureScatterPlot({
 
   const activePiePoint = clickedPoint ?? selectedPoint ?? hoveredPoint ?? mapHoveredPoint;
 
-  useEffect(() => {
-    if (!activePiePoint) return;
-    const timer = setTimeout(() => {
-      const dotElement = document.getElementsByClassName(`scatter-dot-${activePiePoint.id}`)[0];
-      if (dotElement instanceof SVGCircleElement) {
-        const cx = Number(dotElement.getAttribute("cx"));
-        const cy = Number(dotElement.getAttribute("cy"));
-        if (!isNaN(cx) && !isNaN(cy)) {
-          setMousePos({ x: cx + 15, y: cy + 15 });
-        }
-      }
-    }, 16);
-    return () => clearTimeout(timer);
-  }, [activePiePoint]);
-
   const highlightedScatterData = useMemo(
     () =>
       scatterData
@@ -425,7 +376,9 @@ export function InfrastructureScatterPlot({
           const isChartClicked = clickedPointId === entry.id;
           const isMapSelected = selectedSubRegion ? entry.id === `${selectedRegion}-${selectedSubRegion}` : false;
           const isSelected = isChartClicked || isMapSelected;
-          const isCompareSelected = selectedComparePointIds.includes(entry.id);
+          
+          const compareIndex = selectedComparePointIds.indexOf(entry.id);
+          const isCompareSelected = compareIndex !== -1;
 
           return {
             ...entry,
@@ -434,6 +387,7 @@ export function InfrastructureScatterPlot({
               | "hovered"
               | null,
             isCompareSelected,
+            compareIndex,
             isDimmed: hasHoveredPoint && !isHovered && !isSelected && !isCompareSelected,
           };
         })
@@ -463,62 +417,23 @@ export function InfrastructureScatterPlot({
     const idParts = activePiePoint.id.split("-");
     if (idParts.length > 1) {
       const provinceId = idParts[0];
-      const fullProvinceNames: Record<string, string> = {
-        seoul: "서울특별시", busan: "부산광역시", daegu: "대구광역시",
-        incheon: "인천광역시", gwangju: "광주광역시", daejeon: "대전광역시",
-        ulsan: "울산광역시", sejong: "세종특별자치시", gyeonggi: "경기도",
-        gangwon: "강원특별자치도", chungbuk: "충청북도", chungnam: "충청남도",
-        jeonbuk: "전북특별자치도", jeonnam: "전라남도", gyeongbuk: "경상북도",
-        gyeongnam: "경상남도", jeju: "제주특별자치도"
-      };
-      const provinceName = fullProvinceNames[provinceId] || regionsInfo.find((r) => r.id === provinceId)?.name || "";
+      const provinceName = provinceIdToCsvName[provinceId] || regionsInfo.find((r) => r.id === provinceId)?.name || "";
       return `${provinceName} ${activePiePoint.name}`;
     }
     return activePiePoint.name;
   }, [activePiePoint, regionsInfo]);
 
-  // ✅ 툴팁용 메타 데이터 실시간 연산 로직
   const activePointMeta = useMemo(() => {
-    if (!activePiePoint) return null;
-    const idParts = activePiePoint.id.split("-");
-    const provinceId = idParts[0];
-    const districtName = activePiePoint.name;
-
-    const growthRates = getDistrictVisitorGrowthRates(provinceId);
-    const growthRate = growthRates[districtName] || 0;
-
-    const opportunityScores = getDetailOpportunityScores(provinceId);
-    const datum = opportunityScores[districtName];
-
-    let finalOpportunityScore = datum?.opportunityScore || 0;
-
-    // 만약 MainPage에서 weightMap을 넘겨주었다면 산점도 툴팁에서도 실시간 동적 계산
-    if (datum && weightMap && Object.keys(weightMap).length > 0) {
-      const growthZ = growthRate / 0.15;
-      const visitorZ = datum.visitorZ ?? 0;
-      const spendingZ = datum.spendingZ ?? 0;
-      const priceZ = datum.landPriceZ ?? 0;
-      const compZ = datum.accommodationZ ?? 0;
-
-      const dynamicWeightSumSq = Object.values(weightMap).reduce((sum, w) => sum + w * w, 0);
-      const adjustmentFactor = Math.sqrt(dynamicWeightSumSq) || 1;
-
-      const rawFinalZ =
-        (weightMap["growth"] * growthZ) +
-        (weightMap["visitor"] * visitorZ) +
-        (weightMap["spending"] * spendingZ) -
-        (weightMap["price"] * priceZ) -
-        (weightMap["competition"] * compZ);
-
-      const finalZ = rawFinalZ / adjustmentFactor;
-      finalOpportunityScore = zToPercentileScore(finalZ);
-    }
+    if (!activePiePoint || !dynamicAllDetailOpportunityData) return null;
+    
+    const datum = dynamicAllDetailOpportunityData[activePiePoint.id];
+    if (!datum) return null;
 
     return {
-      growthRate,
-      opportunityScore: finalOpportunityScore,
+      growthRate: datum.growthRate || 0,
+      opportunityScore: datum.opportunityScore || 0, 
     };
-  }, [activePiePoint, weightMap]);
+  }, [activePiePoint, dynamicAllDetailOpportunityData]);
 
   const handlePointHover = (item: ScatterDataItem | null) => {
     setHoveredPoint(item);
@@ -538,27 +453,10 @@ export function InfrastructureScatterPlot({
     onDataPointClick?.(item);
   };
 
-  const autoPositionStyle = useMemo(() => {
-    if (!containerRef.current) return { left: `${mousePos.x}px`, top: `${mousePos.y}px` };
-    const w = containerRef.current.clientWidth;
-    const h = containerRef.current.clientHeight;
-
-    let posX = mousePos.x;
-    let posY = mousePos.y;
-
-    if (posX + 270 > w) posX = mousePos.x - 30 - 270;
-    if (posX < 10) posX = 10;
-
-    if (posY + 140 > h) posY = mousePos.y - 30 - 140;
-    if (posY < 10) posY = 10;
-
-    return { left: `${posX}px`, top: `${posY}px` };
-  }, [mousePos, activePiePoint]);
-
   return (
     <div className="relative w-full h-full bg-white rounded-xl shadow-lg p-6 border-[0.5px] border-gray-200 flex flex-col min-h-0">
       <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center justify-between gap-2">
-        <span>지역별 지가 대비 숙박 인프라 현황 분석 (전국 시군구 기준)</span>
+        <span>지역별 분석 (전국 시군구)</span>
       </h3>
 
       <div
@@ -647,8 +545,7 @@ export function InfrastructureScatterPlot({
 
         {activePiePoint && (
           <div 
-            className="pointer-events-none absolute z-20 rounded-lg border border-gray-200 bg-white/90 backdrop-blur-sm shadow-xl p-3 flex flex-col transition-all duration-150 ease-out"
-            style={autoPositionStyle}
+            className="pointer-events-none absolute top-3 right-6 z-20 rounded-lg border border-gray-200 bg-white/95 backdrop-blur-md shadow-xl p-3 flex flex-col transition-opacity duration-150 ease-out min-w-[220px]"
           >
             <div className="flex items-center gap-2 mb-2 min-w-0">
               <p className="text-xs font-bold text-gray-800 truncate flex-1">{displayRegionTitle}</p>

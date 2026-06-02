@@ -3,19 +3,12 @@ import { useMemo, useState, useRef, useCallback } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
-import { ComparePage } from "./ComparePage";
 import { MainSelectionRadarChart } from "./MainSelectionRadarChart";
-
-// 데이터 불러오기 및 변환 함수들
 import { 
   getDetailOpportunityScores, 
   getMainOpportunityScores, 
   zToPercentileScore 
 } from "../data/opportunityData";
-import { 
-  getProvinceVisitorGrowthRates, 
-  getDistrictVisitorGrowthRates 
-} from "../data/visitorData";
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -36,13 +29,12 @@ type CompareRegion = {
   provinceName: string;
 };
 
-// 드래그 앤 드롭용 초기 평가 지표
 const INITIAL_METRICS = [
   { id: "growth", label: "관광객 증감률", type: "positive" },
   { id: "visitor", label: "관광객 규모", type: "positive" },
   { id: "spending", label: "숙박 소비액", type: "positive" },
-  { id: "price", label: "평균 지가 (낮을수록 유리)", type: "negative" },
-  { id: "competition", label: "경쟁 숙박업소 수 (적을수록 유리)", type: "negative" },
+  { id: "price", label: "평균 지가", type: "negative" },
+  { id: "competition", label: "경쟁 숙박업소 수", type: "negative" },
 ];
 
 function splitScatterPointId(id: string) {
@@ -61,14 +53,12 @@ export function MainPage() {
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
   
-  // UI 상태 관리
   const [isCompareMode, setIsCompareMode] = useState(false);
-  const [isRankOpen, setIsRankOpen] = useState(false); // 가중치 설정 패널 상태
+  const [isRankOpen, setIsRankOpen] = useState(false); 
   const [isCompareLaunching, setIsCompareLaunching] = useState(false);
   const [isCompareClosing, setIsCompareClosing] = useState(false);
   const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
 
-  // 드래그 앤 드롭 상태 관리
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -83,7 +73,6 @@ export function MainPage() {
     setMetrics(_metrics);
   };
 
-  // 1. 순위에 따른 가중치 연산 (1위: 5/15, 2위: 4/15 ...)
   const weightMap = useMemo(() => {
     const w: Record<string, number> = {};
     metrics.forEach((m, idx) => {
@@ -92,78 +81,76 @@ export function MainPage() {
     return w;
   }, [metrics]);
 
-  // 2. 동적 점수 계산 로직 
-  const calculateDynamicScores = useCallback((
-    baseData: Record<string, any> | undefined, 
-    growthRates: Record<string, number> | undefined
-  ) => {
+  const allDetailDataMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    regionsInfo.forEach((region) => {
+      const provData = getDetailOpportunityScores(region.id);
+      Object.entries(provData).forEach(([districtName, datum]) => {
+        map[`${region.id}-${districtName}`] = datum;
+      });
+    });
+    return map;
+  }, []);
+
+  const calculateDynamicScores = useCallback((baseData: Record<string, any> | undefined) => {
     const dynamicData: Record<string, any> = {};
     if (!baseData) return dynamicData;
     
-    const safeGrowthRates = growthRates || {};
-    
-    const dynamicWeightSumSq = Object.values(weightMap).reduce((sum, w) => sum + w * w, 0);
-    const adjustmentFactor = Math.sqrt(dynamicWeightSumSq) || 1;
-    
+    const rawScores: { id: string; rawZ: number; datum: any }[] = [];
+
     for (const [id, datum] of Object.entries(baseData)) {
-      if (!datum) continue;
+      if (!datum || !datum.nationalZ) continue;
 
-      const growth = safeGrowthRates[id] || 0;
-      const growthZ = growth / 0.15; 
+      // 💡 여기서 새롭게 구조화된 datum.nationalZ 객체를 참조합니다!
+      const rawZ = 
+        (weightMap["growth"] * datum.nationalZ.growth) +
+        (weightMap["visitor"] * datum.nationalZ.visitor) +
+        (weightMap["spending"] * datum.nationalZ.spending) -
+        (weightMap["price"] * datum.nationalZ.price) -
+        (weightMap["competition"] * datum.nationalZ.accommodation);
 
-      // opportunityData.ts 에서 가져온 원본 Z-score
-      const visitorZ = datum.visitorZ ?? 0;
-      const spendingZ = datum.spendingZ ?? 0;
-      const priceZ = datum.landPriceZ ?? 0;
-      const compZ = datum.accommodationZ ?? 0;
+      rawScores.push({ id, rawZ, datum });
+    }
 
-      // Z-score(-3~+3) 끼리 가중치를 곱해서 단순 합산 (부정 지표는 빼기)
-      const rawFinalZ = 
-        (weightMap["growth"] * growthZ) +
-        (weightMap["visitor"] * visitorZ) +
-        (weightMap["spending"] * spendingZ) -
-        (weightMap["price"] * priceZ) -
-        (weightMap["competition"] * compZ);
+    const rawZMean = rawScores.length 
+      ? rawScores.reduce((acc, curr) => acc + curr.rawZ, 0) / rawScores.length 
+      : 0;
+    const rawZStd = rawScores.length 
+      ? Math.sqrt(rawScores.reduce((acc, curr) => acc + Math.pow(curr.rawZ - rawZMean, 2), 0) / rawScores.length) || 1
+      : 1;
 
-      const finalZ = rawFinalZ / adjustmentFactor;
-
-      dynamicData[id] = {
-        ...datum,
-        growthZ: growthZ,
+    for (const item of rawScores) {
+      const finalZ = (item.rawZ - rawZMean) / rawZStd; 
+      dynamicData[item.id] = {
+        ...item.datum,
         opportunityScore: zToPercentileScore(finalZ) 
       };
     }
+
     return dynamicData;
   }, [weightMap]);
 
-  // 3. 데이터 패치 및 메모이제이션
-  const provinceGrowthRates = useMemo(() => {
-    try {
-      return typeof getProvinceVisitorGrowthRates === 'function' ? getProvinceVisitorGrowthRates() : {};
-    } catch {
-      return {};
-    }
-  }, []);
-  
-  const districtGrowthRates = useMemo(() => {
-    try {
-      return typeof getDistrictVisitorGrowthRates === 'function' ? getDistrictVisitorGrowthRates(currentViewLevel) : {};
-    } catch {
-      return {};
-    }
-  }, [currentViewLevel]);
-
   const dynamicMainOpportunityData = useMemo(() => {
     const baseData = getMainOpportunityScores();
-    return calculateDynamicScores(baseData, provinceGrowthRates);
-  }, [calculateDynamicScores, provinceGrowthRates]);
+    return calculateDynamicScores(baseData);
+  }, [calculateDynamicScores]);
+
+  const dynamicAllDetailOpportunityData = useMemo(() => {
+    return calculateDynamicScores(allDetailDataMap);
+  }, [calculateDynamicScores, allDetailDataMap]);
 
   const dynamicDetailOpportunityData = useMemo(() => {
-    const baseData = getDetailOpportunityScores(currentViewLevel);
-    return calculateDynamicScores(baseData, districtGrowthRates);
-  }, [currentViewLevel, calculateDynamicScores, districtGrowthRates]);
+    if (currentViewLevel === "national") return {};
+    const provinceData: Record<string, any> = {};
+    Object.entries(dynamicAllDetailOpportunityData).forEach(([compositeKey, datum]) => {
+      if (compositeKey.startsWith(`${currentViewLevel}-`)) {
+        const districtName = compositeKey.replace(`${currentViewLevel}-`, "");
+        provinceData[districtName] = datum;
+      }
+    });
+    return provinceData;
+  }, [currentViewLevel, dynamicAllDetailOpportunityData]);
 
-  // 기타 UI 로직
   const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
   const compareScatterPointIds = useMemo(
     () => compareRegions.map((region) => `${region.provinceId}-${region.id}`),
@@ -192,20 +179,6 @@ export function MainPage() {
 
   const removeCompareRegion = (regionId: string) => {
     setCompareRegions((prev) => prev.filter((region) => region.id !== regionId));
-  };
-
-  const goToComparePage = () => {
-    if (compareRegions.length < 2 || isCompareLaunching) return;
-    setIsCompareClosing(false);
-    setIsCompareLaunching(true);
-  };
-
-  const closeComparePage = () => {
-    setIsCompareClosing(true);
-    window.setTimeout(() => {
-      setIsCompareLaunching(false);
-      setIsCompareClosing(false);
-    }, 520);
   };
 
   const resetSubRegionState = () => {
@@ -251,37 +224,9 @@ export function MainPage() {
 
   return (
     <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
-      {/* 우측 가장자리 숨김 화살표 (비교페이지 이동) */}
-      <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
-        <button
-          type="button"
-          onClick={goToComparePage}
-          disabled={compareRegions.length < 2}
-          className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-[#8b5cf6] disabled:opacity-35 disabled:hover:border-gray-200 disabled:cursor-not-allowed"
-        >
-          <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-[#8b5cf6] transition-transform group-hover:-translate-x-0.5" />
-        </button>
-      </div>
-
-      {isCompareLaunching && (
-        <div
-          className={`fixed inset-0 z-[80] bg-gray-100 shadow-2xl overflow-y-auto overscroll-contain ${
-            isCompareClosing
-              ? "animate-[compare-slide-dismiss_520ms_ease-out_forwards]"
-              : "animate-[compare-slide-cover_520ms_ease-out_forwards]"
-          }`}
-        >
-          <ComparePage regionsOverride={compareRegions} embedded onClose={closeComparePage} />
-        </div>
-      )}
-
-      {/* 좌측 지도 패널 */}
       <div className="absolute left-[1.5%] top-1/2 -translate-y-1/2 w-[45.5%] h-[94%] bg-white rounded-2xl shadow-lg border-[0.5px] border-gray-200 overflow-hidden">
         
-        {/* 상단 우측 플로팅 버튼 그룹 (우선순위 설정 + 장바구니) */}
         <div className="absolute right-5 top-5 z-40 flex items-start gap-3">
-          
-          {/* 1. 평가 지표 우선순위 설정 위젯 */}
           <div className="relative flex flex-col items-end">
             <button
               type="button"
@@ -325,9 +270,6 @@ export function MainPage() {
                         </div>
                         <span className="text-xs font-semibold text-gray-700 truncate">{metric.label}</span>
                       </div>
-                      <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">
-                        {Math.round(weightMap[metric.id] * 100)}%
-                      </span>
                     </div>
                   ))}
                 </div>
@@ -335,7 +277,6 @@ export function MainPage() {
             )}
           </div>
 
-          {/* 2. 장바구니 위젯 */}
           <div className="relative flex flex-col items-end">
             <button
               type="button"
@@ -390,7 +331,6 @@ export function MainPage() {
           </div>
         </div>
 
-        {/* 지도 렌더링 영역 */}
         {currentViewLevel === "national" ? (
           <KoreaMap
             onRegionClick={(id) => {
@@ -424,7 +364,6 @@ export function MainPage() {
         )}
       </div>
 
-      {/* 우측 산점도 및 레이더 차트 패널 */}
       <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
         <div className={`${compareRegions.length > 0 ? "flex-[1.35]" : "flex-1"} min-h-0 relative`}>
           <InfrastructureScatterPlot
@@ -437,7 +376,7 @@ export function MainPage() {
             regionsInfo={regionsInfo}
             selectedComparePointIds={compareScatterPointIds}
             isCompareMode={isCompareMode}
-            weightMap={weightMap}
+            dynamicAllDetailOpportunityData={dynamicAllDetailOpportunityData}
             onDataPointHover={handleScatterHover}
             onDataPointClick={handleScatterClick}
           />

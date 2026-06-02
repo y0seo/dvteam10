@@ -37,6 +37,8 @@ const regionNames: Record<string, string> = {
   daegu: "대구", gyeongnam: "경남", ulsan: "울산", busan: "부산", jeju: "제주"
 };
 
+const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
+
 const getSvgAttribute = (tag: string, attribute: string) => {
   const match = tag.match(new RegExp(`${attribute}="([^"]+)"`));
   return match?.[1] || "";
@@ -55,7 +57,8 @@ interface DetailRegionMapProps {
 
 export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number }[]>([]);
+  
+  const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number; color: string }[]>([]);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
 
   const svgContent = useMemo(() => {
@@ -104,20 +107,23 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
-      const heatmapColor = getHeatmapColorFromRatio(opportunityData[id]?.opportunityScore*0.01);
+      const heatmapColor = getHeatmapColorFromRatio((opportunityData[id]?.opportunityScore || 0) * 0.01);
       const isSelected = selectedSubRegion === id;
-      const isCompareSelected = selectedCompareSubRegions.includes(id);
+      
+      const compareIndex = selectedCompareSubRegions.indexOf(id);
+      const isCompareSelected = compareIndex !== -1;
       const isHovered = activeHoveredSubRegion === id;
 
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
-
+      
+      // COLOR 
       if (isHovered) {
-        strokeColor = "#ab418f"; 
-        strokeWidth = "2px";
+        strokeColor = "#6E5FB3"; 
+        strokeWidth = "2.5px";
       } else if (isCompareSelected) {
-        strokeColor = "#8b5cf6"; 
-        strokeWidth = "2px";
+        strokeColor = REGION_COLORS[compareIndex]; 
+        strokeWidth = "2.5px";
       } else if (isSelected) {
         strokeColor = "#415aab"; 
         strokeWidth = "2px";
@@ -144,7 +150,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
 
       const containerRect = container.getBoundingClientRect();
       const markers = selectedCompareSubRegions
-        .map((id) => {
+        .map((id, index) => { 
           const regionElement = container.querySelector<SVGGraphicsElement>(`[id="${id}"]`);
           if (!regionElement) return null;
 
@@ -153,9 +159,10 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
             id,
             x: rect.left + rect.width / 2 - containerRect.left,
             y: rect.top + rect.height / 2 - containerRect.top,
+            color: REGION_COLORS[index], 
           };
         })
-        .filter((marker): marker is { id: string; x: number; y: number } => Boolean(marker));
+        .filter((marker): marker is { id: string; x: number; y: number; color: string } => Boolean(marker));
 
       setCheckMarkers(markers);
     });
@@ -211,8 +218,12 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
         {checkMarkers.map((marker) => (
           <div
             key={marker.id}
-            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#8b5cf6] text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
-            style={{ left: marker.x, top: marker.y }}
+            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black transition-colors duration-300"
+            style={{ 
+              left: marker.x, 
+              top: marker.y,
+              backgroundColor: marker.color 
+            }}
           >
             ✓
           </div>
