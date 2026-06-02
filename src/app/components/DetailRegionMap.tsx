@@ -53,9 +53,10 @@ interface DetailRegionMapProps {
   selectedSubRegion: string | null;
   externalHoveredSubRegion?: string | null;
   selectedCompareSubRegions?: string[];
+  brushedSubRegions?: string[];
 }
 
-export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [], brushedSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   
   const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number; color: string }[]>([]);
@@ -98,11 +99,12 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
       }
     };
 
-    if (activeHoveredSubRegion) bringToFront(activeHoveredSubRegion); 
-    if (selectedCompareSubRegions.length > 0) selectedCompareSubRegions.forEach(bringToFront); 
-    if (selectedSubRegion) bringToFront(selectedSubRegion); 
+    brushedSubRegions.forEach(bringToFront);
+    if (activeHoveredSubRegion) bringToFront(activeHoveredSubRegion);
+    if (selectedCompareSubRegions.length > 0) selectedCompareSubRegions.forEach(bringToFront);
+    if (selectedSubRegion) bringToFront(selectedSubRegion);
 
-  }, [selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, svgContent]);
+  }, [selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, brushedSubRegions, svgContent]);
 
   const dynamicStyles = useMemo(() => {
     let styles = "";
@@ -113,19 +115,22 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
       const compareIndex = selectedCompareSubRegions.indexOf(id);
       const isCompareSelected = compareIndex !== -1;
       const isHovered = activeHoveredSubRegion === id;
+      const isBrushed = brushedSubRegions.includes(id);
 
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
-      
-      // COLOR 
+      // 우선순위: hover > brushed > compare > selected
       if (isHovered) {
-        strokeColor = "#6E5FB3"; 
+        strokeColor = "#6E5FB3";
         strokeWidth = "2.5px";
+      } else if (isBrushed) {
+        strokeColor = "#f97316";
+        strokeWidth = "3px";
       } else if (isCompareSelected) {
-        strokeColor = REGION_COLORS[compareIndex]; 
+        strokeColor = REGION_COLORS[compareIndex];
         strokeWidth = "2.5px";
       } else if (isSelected) {
-        strokeColor = "#415aab"; 
+        strokeColor = "#415aab";
         strokeWidth = "2px";
       }
 
@@ -141,7 +146,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
       `;
     });
     return styles;
-  }, [opportunityData, selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, subRegionIds]);
+  }, [opportunityData, selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, brushedSubRegions, subRegionIds]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

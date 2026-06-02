@@ -3,6 +3,8 @@ import lodgingSpendingCsvRaw from "../../data/lodging_spending.csv?raw";
 import realEstateCsvRaw from "../../data/real_estate_price.csv?raw";
 import {
   getAllDistrictVisitorTotals,
+  getDistrictVisitorGrowthRates,
+  getProvinceVisitorGrowthRates,
   getRegionMonthlyVisitorTrend,
   getRegionVisitorTotal,
   provinceCsvNameToId,
@@ -20,7 +22,8 @@ export type MetricKey =
   | "foreignVisitors"
   | "accommodationSpending"
   | "accommodationBusinesses"
-  | "landPrice";
+  | "landPrice"
+  | "visitorGrowth";
 
 export type ComparisonMetric = {
   key: MetricKey;
@@ -37,6 +40,8 @@ export type RegionComparisonRow = {
   monthlyVisitors: { month: string; visitors: number }[];
 };
 
+// label: 비교 카드 등 원본 지표 표기용 (그대로 유지)
+// shortLabel: 레이더 축 표기용 — 역산 지표는 "높을수록 유리"가 되도록 긍정 라벨 사용
 const METRIC_LABELS: Record<MetricKey, Omit<ComparisonMetric, "key" | "value">> = {
   foreignVisitors: { label: "외국인 방문자 수", shortLabel: "방문자", unit: "명" },
   accommodationSpending: {
@@ -44,8 +49,9 @@ const METRIC_LABELS: Record<MetricKey, Omit<ComparisonMetric, "key" | "value">> 
     shortLabel: "소비액",
     unit: "천원",
   },
-  accommodationBusinesses: { label: "숙박업소 수", shortLabel: "숙박업소", unit: "개" },
-  landPrice: { label: "1㎡당 토지 거래가", shortLabel: "토지 거래가", unit: "만원" },
+  accommodationBusinesses: { label: "숙박업소 수", shortLabel: "블루오션도", unit: "개" },
+  landPrice: { label: "1㎡당 토지 거래가", shortLabel: "가격경쟁력", unit: "만원" },
+  visitorGrowth: { label: "관광객 증감률", shortLabel: "성장세", unit: "%" },
 };
 
 const stripBom = (value: string) => (value.charCodeAt(0) === 0xfeff ? value.slice(1) : value);
@@ -139,6 +145,15 @@ function getLandPrice(provinceId: string, districtName: string | null) {
   return Math.round((rows.reduce((sum, row) => sum + row.price, 0) / rows.length) * 10) / 10;
 }
 
+function getRegionVisitorGrowth(provinceId: string, districtName: string | null): number | null {
+  if (districtName) {
+    const rates = getDistrictVisitorGrowthRates(provinceId);
+    return districtName in rates ? rates[districtName] : null;
+  }
+  const rates = getProvinceVisitorGrowthRates();
+  return provinceId in rates ? rates[provinceId] : null;
+}
+
 export function getAccommodationSpending(provinceId: string, districtName: string | null) {
   const provinceName = provinceIdToCsvName[provinceId];
   if (!provinceName) return null;
@@ -181,6 +196,10 @@ export function buildComparisonRows(regions: CompareRegion[]): RegionComparisonR
           getAccommodationBusinesses(region.provinceId, districtName),
         ),
         landPrice: createMetric("landPrice", getLandPrice(region.provinceId, districtName)),
+        visitorGrowth: createMetric(
+          "visitorGrowth",
+          getRegionVisitorGrowth(region.provinceId, districtName),
+        ),
       },
       monthlyVisitors: getRegionMonthlyVisitorTrend(region.provinceId, districtName),
     };
@@ -193,6 +212,23 @@ export const comparisonMetricKeys: MetricKey[] = [
   "accommodationBusinesses",
   "landPrice",
 ];
+
+// 레이더 전용 5축. 비교 카드(comparisonMetricKeys)와 분리하여
+// 성장세 축 추가가 카드/아이콘 레이아웃에 영향을 주지 않게 한다.
+export const radarMetricKeys: MetricKey[] = [
+  "foreignVisitors",
+  "accommodationSpending",
+  "visitorGrowth",
+  "accommodationBusinesses",
+  "landPrice",
+];
+
+// "낮을수록 유리"한 지표는 레이더에서 100−percentile로 역산하여
+// 바깥쪽(높은 점수)이 항상 "유리"를 의미하도록 통일한다.
+const RADAR_INVERTED_METRICS: Partial<Record<MetricKey, boolean>> = {
+  landPrice: true,
+  accommodationBusinesses: true,
+};
 
 // --- 정규화: 전국 시군구 분포 기반 percentile rank ---
 
@@ -261,6 +297,17 @@ function buildMetricDistribution(metric: MetricKey): DistrictMetricRow[] {
           district: row.district,
           value: row.spending,
         }));
+    case "visitorGrowth": {
+      const rows: DistrictMetricRow[] = [];
+      for (const provinceId of Object.keys(provinceIdToCsvName)) {
+        const provinceName = provinceIdToCsvName[provinceId];
+        const rates = getDistrictVisitorGrowthRates(provinceId);
+        for (const [district, value] of Object.entries(rates)) {
+          rows.push({ provinceName, district, value });
+        }
+      }
+      return rows;
+    }
   }
 }
 
@@ -343,4 +390,21 @@ export function getPeerPercentile(
           })
           .map((row) => row.value);
   return percentileRank(value, peerValues);
+}
+
+// 레이더용 점수: 역산 지표는 100−percentile (높을수록 유리). 값 없음은 0.
+export function getNationwideRadarScore(metric: MetricKey, value: number | null): number {
+  if (value == null) return 0;
+  const pct = getNationwidePercentile(metric, value);
+  return RADAR_INVERTED_METRICS[metric] ? 100 - pct : pct;
+}
+
+export function getPeerRadarScore(
+  metric: MetricKey,
+  value: number | null,
+  scope: PeerScope,
+): number {
+  if (value == null) return 0;
+  const pct = getPeerPercentile(metric, value, scope);
+  return RADAR_INVERTED_METRICS[metric] ? 100 - pct : pct;
 }

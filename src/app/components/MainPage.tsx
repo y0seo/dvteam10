@@ -1,9 +1,11 @@
 import { Check, ShoppingCart, Menu, X, SlidersHorizontal } from "lucide-react";
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
-import { MainSelectionRadarChart } from "./MainSelectionRadarChart";
+import { InlineComparePanel } from "./InlineComparePanel";
+
+// 데이터 불러오기 및 변환 함수들
 import { 
   getDetailOpportunityScores, 
   getMainOpportunityScores, 
@@ -52,12 +54,13 @@ export function MainPage() {
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
+  const [brushedPointIds, setBrushedPointIds] = useState<string[]>([]);
   
   const [isCompareMode, setIsCompareMode] = useState(false);
-  const [isRankOpen, setIsRankOpen] = useState(false); 
-  const [isCompareLaunching, setIsCompareLaunching] = useState(false);
-  const [isCompareClosing, setIsCompareClosing] = useState(false);
+  const [isRankOpen, setIsRankOpen] = useState(false); // 가중치 설정 패널 상태
   const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
+  const [inlineCompareDismissed, setInlineCompareDismissed] = useState(false); // 사용자가 X로 닫음
+  const [inlineCompareVisible, setInlineCompareVisible] = useState(false); // 슬라이드-인 트리거
 
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
   const dragItem = useRef<number | null>(null);
@@ -158,6 +161,50 @@ export function MainPage() {
   );
   const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
 
+  // 인라인 비교패널: 장바구니 3곳 모두 선택했을 때만 마운트, 수동으로 닫지 않았으면 표시
+  const shouldMountInlineCompare = compareRegions.length === 3;
+  const showInlineCompare = shouldMountInlineCompare && !inlineCompareDismissed;
+
+  // 장바구니 구성이 바뀌면(추가/제거) 수동 닫기 해제 → 자동으로 다시 열림
+  useEffect(() => {
+    setInlineCompareDismissed(false);
+  }, [compareRegions.length]);
+
+  // 슬라이드-인: 마운트 직후 off-screen → 0 으로 전환해 트랜지션 유발.
+  // (rAF는 백그라운드 탭에서 멈추므로 setTimeout 사용 → 어떤 경우에도 결국 표시됨)
+  useEffect(() => {
+    if (!showInlineCompare) {
+      setInlineCompareVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setInlineCompareVisible(true), 20);
+    return () => window.clearTimeout(timer);
+  }, [showInlineCompare]);
+
+  // 산점도 브러싱 결과 → 지도 cross-highlight용 파생 목록
+  const handleBrushSelect = useCallback((ids: string[]) => {
+    setBrushedPointIds(ids);
+  }, []);
+
+  const brushedProvinceIds = useMemo(
+    () => [...new Set(brushedPointIds.map((id) => splitScatterPointId(id).provinceId))],
+    [brushedPointIds],
+  );
+
+  const brushedSubRegionIds = useMemo(
+    () =>
+      brushedPointIds
+        .map((id) => splitScatterPointId(id))
+        .filter((parts) => parts.provinceId === currentViewLevel && parts.subRegionId)
+        .map((parts) => parts.subRegionId as string),
+    [brushedPointIds, currentViewLevel],
+  );
+
+  // 전국 ↔ 시·도 화면 전환 시 브러싱 하이라이트 초기화
+  useEffect(() => {
+    setBrushedPointIds([]);
+  }, [currentViewLevel]);
+
   const toggleCompareRegion = (subId: string, subName: string) => {
     setCompareRegions((prev) => {
       if (prev.some((region) => region.id === subId)) {
@@ -224,6 +271,21 @@ export function MainPage() {
 
   return (
     <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
+      {/* 우측 가장자리 탭: 비교패널을 닫은 상태에서 다시 열기 */}
+      {shouldMountInlineCompare && !showInlineCompare && (
+        <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
+          <button
+            type="button"
+            onClick={() => setInlineCompareDismissed(false)}
+            className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-[#8b5cf6]"
+            title="비교 패널 다시 열기"
+          >
+            <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-[#8b5cf6] transition-transform group-hover:-translate-x-0.5" />
+          </button>
+        </div>
+      )}
+
+      {/* 좌측 지도 패널 */}
       <div className="absolute left-[1.5%] top-1/2 -translate-y-1/2 w-[45.5%] h-[94%] bg-white rounded-2xl shadow-lg border-[0.5px] border-gray-200 overflow-hidden">
         
         <div className="absolute right-5 top-5 z-40 flex items-start gap-3">
@@ -346,6 +408,7 @@ export function MainPage() {
             selectedRegion={selectedRegion}
             externalHoveredRegion={hoveredRegion}
             opportunityData={dynamicMainOpportunityData}
+            brushedRegions={brushedProvinceIds}
           />
         ) : (
           <DetailRegionMap
@@ -360,12 +423,13 @@ export function MainPage() {
             selectedSubRegion={selectedSubRegion}
             externalHoveredSubRegion={hoveredSubRegion}
             selectedCompareSubRegions={compareRegionIds}
+            brushedSubRegions={brushedSubRegionIds}
           />
         )}
       </div>
 
       <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
-        <div className={`${compareRegions.length > 0 ? "flex-[1.35]" : "flex-1"} min-h-0 relative`}>
+        <div className="flex-1 min-h-0 relative">
           <InfrastructureScatterPlot
             currentViewLevel={currentViewLevel}
             selectedRegion={currentViewLevel === "national" ? "national" : currentViewLevel}
@@ -376,14 +440,28 @@ export function MainPage() {
             regionsInfo={regionsInfo}
             selectedComparePointIds={compareScatterPointIds}
             isCompareMode={isCompareMode}
-            dynamicAllDetailOpportunityData={dynamicAllDetailOpportunityData}
+            weightMap={weightMap}
             onDataPointHover={handleScatterHover}
             onDataPointClick={handleScatterClick}
+            onBrushSelect={handleBrushSelect}
+            brushedIds={brushedPointIds}
           />
         </div>
-        {compareRegions.length > 0 && (
-          <div className="flex-[0.95] min-h-0">
-            <MainSelectionRadarChart selectedRegions={compareRegions} />
+
+        {/* 인라인 비교패널: 우측 컬럼 위로 슬라이드 오버 (장바구니 3곳 모두 선택 시) */}
+        {shouldMountInlineCompare && (
+          <div
+            className={`absolute inset-0 z-30 transition-transform duration-500 ease-out ${
+              showInlineCompare && inlineCompareVisible
+                ? "translate-x-0"
+                : "translate-x-[105%] pointer-events-none"
+            }`}
+          >
+            <InlineComparePanel
+              regions={compareRegions}
+              weightMap={weightMap}
+              onClose={() => setInlineCompareDismissed(true)}
+            />
           </div>
         )}
       </div>

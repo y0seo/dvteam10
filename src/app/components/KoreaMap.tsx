@@ -14,6 +14,7 @@ interface KoreaMapProps {
   selectedRegion: string | null;
   opportunityData: Record<string, OpportunityDatum>;
   externalHoveredRegion?: string | null;
+  brushedRegions?: string[];
 }
 
 const regionsInfo = [
@@ -28,7 +29,7 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData, externalHoveredRegion }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData, externalHoveredRegion, brushedRegions = [] }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
@@ -61,10 +62,11 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       }
     };
 
+    brushedRegions.forEach(bringToFront);
     if (selectedRegion) bringToFront(selectedRegion);
     if (hoveredRegion) bringToFront(hoveredRegion);
 
-  }, [selectedRegion, hoveredRegion, svgContent]);
+  }, [selectedRegion, hoveredRegion, brushedRegions, svgContent]);
 
   
   const dynamicStyles = useMemo(() => {
@@ -73,17 +75,21 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       const heatmapColor = getHeatmapColorFromRatio(opportunityData[region.id]?.opportunityScore*0.01);
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
+      const isBrushed = brushedRegions.includes(region.id);
 
       // default
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
 
-      // COLOR
+      // cond — 우선순위: hover > brushed > selected
       if (isHovered) {
-        strokeColor = "#ab418f"; 
+        strokeColor = "#ab418f";
         strokeWidth = "2px";
+      } else if (isBrushed) {
+        strokeColor = "#f97316";
+        strokeWidth = "3px";
       } else if (isSelected) {
-        strokeColor = "#ab418f";  
+        strokeColor = "#ab9241";
         strokeWidth = "2px";
       }
 
@@ -99,7 +105,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       `;
     });
     return styles;
-  }, [opportunityData, selectedRegion, hoveredRegion]);
+  }, [opportunityData, selectedRegion, hoveredRegion, brushedRegions]);
 
   const validIds = regionsInfo.map(r => r.id);
 
