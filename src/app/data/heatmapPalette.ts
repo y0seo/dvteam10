@@ -2,16 +2,16 @@
 // Cool, low-fatigue ramp: pale teal (low score) → deep navy (명당/high score).
 // Warm tones (amber/red) are reserved for caution signals elsewhere (지가, brushing).
 export const HEATMAP_PALETTE = [
-  "#f2fbfb", // 0 pale teal
-  "#d8f3f0", // 1
-  "#b5e7e1", // 2
-  "#8bd6cf", // 3
-  "#5dbfb8", // 4
-  "#34a39d", // 5 teal (center)
-  "#1f867f", // 6
-  "#176a6b", // 7
-  "#124f5c", // 8
-  "#0d3547", // 9 deep navy
+  "#f3faf3", // 0
+  "#e2f3e2", // 1
+  "#cde8cd", // 2
+  "#b4dbb4", // 3
+  "#8fc98f", // 4
+  "#5FB35F", // 5 (center)
+  "#4b9d4b", // 6
+  "#388738", // 7
+  "#286f28", // 8
+  "#184f18", // 9
 ] as const;
 
 // Missing data
