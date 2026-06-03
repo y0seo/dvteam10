@@ -3,17 +3,17 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import KoreaMapSvgRaw from "../../imports/kr1.svg?raw";
 import {
   HEATMAP_GRADIENT,
-  formatVisitorsInMan,
-  getHeatmapColor,
+  getHeatmapColorFromRatio,
 } from "../data/heatmapPalette";
+import type { OpportunityDatum } from "../data/opportunityData";
 
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
   onRegionHover: (region: string | null) => void;
-  onRegionDoubleClick: (region: string) => void; 
   selectedRegion: string | null;
-  visitorData: { [key: string]: number };
-  colorScaleMax: number;
+  opportunityData: Record<string, OpportunityDatum>;
+  externalHoveredRegion?: string | null;
+  brushedRegions?: string[];
 }
 
 const regionsInfo = [
@@ -28,12 +28,17 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, visitorData, colorScaleMax }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, opportunityData, externalHoveredRegion, brushedRegions = [] }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
 
-  
+  useEffect(() => {
+    if (externalHoveredRegion !== undefined) {
+      setHoveredRegion(externalHoveredRegion);
+    }
+  }, [externalHoveredRegion]);
+
   useEffect(() => {
     if (KoreaMapSvgRaw) {
       const responsiveSvg = KoreaMapSvgRaw
@@ -43,7 +48,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
     }
   }, []);
 
-  
   useEffect(() => {
     if (!mapContainerRef.current) return;
     const svgElement = mapContainerRef.current.querySelector("svg");
@@ -56,30 +60,36 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       }
     };
 
+    brushedRegions.forEach(bringToFront);
     if (selectedRegion) bringToFront(selectedRegion);
     if (hoveredRegion) bringToFront(hoveredRegion);
 
-  }, [selectedRegion, hoveredRegion, svgContent]);
+  }, [selectedRegion, hoveredRegion, brushedRegions, svgContent]);
 
-  
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
-      const visitors = visitorData[region.id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
+      const score = opportunityData[region.id]?.opportunityScore;
+      const heatmapColor = getHeatmapColorFromRatio(
+        typeof score === "number" ? score * 0.01 : undefined,
+      );
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
+      const isBrushed = brushedRegions.includes(region.id);
 
       // default
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
 
-      // cond
+      // cond — 우선순위: hover > brushed > selected
       if (isHovered) {
-        strokeColor = "#c17aab"; 
+        strokeColor = "#ab418f";
+        strokeWidth = "2px";
+      } else if (isBrushed) {
+        strokeColor = "#f97316";
         strokeWidth = "3px";
       } else if (isSelected) {
-        strokeColor = "#c1907a";  
+        strokeColor = "#ab9241";
         strokeWidth = "2px";
       }
 
@@ -95,12 +105,11 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       `;
     });
     return styles;
-  }, [visitorData, selectedRegion, hoveredRegion, colorScaleMax]);
+  }, [opportunityData, selectedRegion, hoveredRegion, brushedRegions]);
 
   const validIds = regionsInfo.map(r => r.id);
 
-  
-  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover" | "doubleclick") => {
+  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover") => {
     const target = e.target as SVGElement;
     const regionElement = target.id ? target : (target.closest('g') || target.closest('path'));
     const regionId = regionElement?.id;
@@ -111,7 +120,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
         setHoveredRegion(regionId);
         onRegionHover(regionId);
       }
-      if (type === "doubleclick") onRegionDoubleClick(regionId);
     } else if (type === "hover") {
       setHoveredRegion(null);
       onRegionHover(null);
@@ -119,20 +127,27 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   };
 
   const currentRegion = regionsInfo.find(r => r.id === (hoveredRegion || selectedRegion));
+  const currentOpportunity = currentRegion ? opportunityData[currentRegion.id] : null;
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
       <style>{dynamicStyles}</style>
 
       {/* 정보창 상단 팝업 */}
-      {currentRegion && (
+      {currentRegion ? (
         <div className="absolute top-6 left-6 bg-white px-5 py-4 rounded-xl shadow-xl border border-blue-100 pointer-events-none z-20 transition-all backdrop-blur-md bg-opacity-90">
           <p className="text-sm font-semibold text-gray-500 mb-1">
-            {currentRegion.name} 관광객 수
+            {currentRegion.name} 입지 기회도
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {visitorData[currentRegion.id]?.toLocaleString() || 0}
-            <span className="text-base text-gray-600 font-medium ml-1">명</span>
+            {currentOpportunity?.opportunityScore.toFixed(1) ?? "-"}
+            <span className="text-base text-gray-500 font-medium ml-1">점</span>
+          </p>
+        </div>
+      ) : (
+        <div className="absolute top-6 left-6 bg-white/85 px-5 py-4 rounded-xl shadow-md border border-gray-200 pointer-events-none z-20 backdrop-blur-md">
+          <p className="text-sm font-semibold text-gray-500">
+            클릭하여 세부 지역 확인
           </p>
         </div>
       )}
@@ -147,21 +162,20 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
           setHoveredRegion(null);
           onRegionHover(null);
         }}
-        onDoubleClick={(e) => handleInteraction(e, "doubleclick")}
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 
       {/* 우측 하단 범례 */}
       <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <p className="text-[10px] font-bold text-gray-700 mb-2">입지 기회도</p>
         <div className="flex items-stretch gap-2.5">
           <div
             className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(colorScaleMax)}</span>
-            <span>0명</span>
+            <span>100점 (최적)</span>
+            <span>0점</span>
           </div>
         </div>
       </div>

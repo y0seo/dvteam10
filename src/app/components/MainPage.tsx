@@ -1,25 +1,17 @@
-import { useNavigate } from "react-router";
-import { Check, ShoppingCart, X } from "lucide-react";
-import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Legend } from "recharts";
-import { useState, useMemo } from "react";
+import { Check, ShoppingCart, Menu, X, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { KoreaMap } from "./KoreaMap";
 import { DetailRegionMap } from "./DetailRegionMap";
 import { InfrastructureScatterPlot } from "./InfrastructureScatterPlot";
-import { ComparePage } from "./ComparePage";
-import {
-  getDistrictVisitorScaleMax,
-  getDistrictVisitorTotals,
-  getProvinceVisitorScaleMax,
-  getProvinceVisitorTotals,
-} from "../data/visitorData";
-import {
-  COMPANION_COLORS,
-  getCompanionAverageByCountry,
-  type CompanionDatum,
-} from "../data/companionData";
+import { InlineComparePanel } from "./InlineComparePanel";
 
-import { getCountryPercentagesByRegion, } from "../data/nationality";
-import { CONTINENT_COLORS, getCountryMeta } from "../data/countrymeta";
+// 데이터 불러오기 및 변환 함수들
+import { 
+  getDetailOpportunityScores, 
+  getMainOpportunityScores, 
+  zToPercentileScore 
+} from "../data/opportunityData";
+import { getHeatmapColorFromRatio } from "../data/heatmapPalette"; // ✅ 히트맵 색상 함수 추가
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -30,31 +22,8 @@ const regionsInfo = [
   { id: "gwangju", name: "광주" }, { id: "gyeongbuk", name: "경북" },
   { id: "daegu", name: "대구" }, { id: "gyeongnam", name: "경남" },
   { id: "ulsan", name: "울산" }, { id: "busan", name: "부산" },
-  { id: "jeju", name: "제주" }
+  { id: "jeju", name: "제주" },
 ];
-
-function CountryYAxisTick({ x, y, payload }: { x?: number; y?: number; payload?: { value?: string } }) {
-  const countryName = payload?.value || "";
-  const { countryCode } = getCountryMeta(countryName);
-  
-  return (
-    <g transform={`translate(${x},${y})`}>
-      {countryCode && (
-        <image
-          href={`https://flagcdn.com/w20/${countryCode}.png`}
-          x={-80}
-          y={-6}
-          width="16"
-          height="11.5"
-          preserveAspectRatio="xMidYMid slice"
-        />
-      )}
-      <text x={countryCode ? -58 : -80} y={3.5} textAnchor="start" fill="#374151" fontSize={11.5} fontWeight="bold">
-        {countryName}
-      </text>
-    </g>
-  );
-}
 
 type CompareRegion = {
   id: string;
@@ -63,69 +32,198 @@ type CompareRegion = {
   provinceName: string;
 };
 
+const INITIAL_METRICS = [
+  { id: "growth", label: "관광객 증감률", type: "positive" },
+  { id: "visitor", label: "관광객 규모", type: "positive" },
+  { id: "spending", label: "숙박 소비액", type: "positive" },
+  { id: "price", label: "평균 지가", type: "negative" },
+  { id: "competition", label: "경쟁 숙박업소 수", type: "negative" },
+];
+
+function splitScatterPointId(id: string) {
+  const [provinceId, ...subRegionParts] = id.split("-");
+  return {
+    provinceId,
+    subRegionId: subRegionParts.length > 0 ? subRegionParts.join("-") : null,
+  };
+}
 
 export function MainPage() {
-  const navigate = useNavigate();
   const [currentViewLevel, setCurrentViewLevel] = useState<string>("national");
-  const [selectedRegion, setSelectedRegion] = useState<string>("seoul");
+  const [selectedRegion, setSelectedRegion] = useState<string>("");
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
-
   const [selectedSubRegion, setSelectedSubRegion] = useState<string | null>(null);
   const [selectedSubRegionName, setSelectedSubRegionName] = useState<string | null>(null);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
+  const [brushedPointIds, setBrushedPointIds] = useState<string[]>([]);
+  
   const [isCompareMode, setIsCompareMode] = useState(false);
-  const [isCompareLaunching, setIsCompareLaunching] = useState(false);
-  const [isCompareClosing, setIsCompareClosing] = useState(false);
+  const [isRankOpen, setIsRankOpen] = useState(false);
   const [compareRegions, setCompareRegions] = useState<CompareRegion[]>([]);
-  const [highlightedCountry, setHighlightedCountry] = useState<string | null>(null);
+  const [inlineCompareDismissed, setInlineCompareDismissed] = useState(false);
+  const [inlineCompareVisible, setInlineCompareVisible] = useState(false);
 
-  const TOTAL_MONTHS = 12;
-  const MAX_MONTH_INDEX = TOTAL_MONTHS - 1;
-  const [selectedMonthIndex, setSelectedMonthIndex] = useState(0);
-  const [hoveredMonthIndex, setHoveredMonthIndex] = useState<number | null>(null);
+  const [rankingHeightPct, setRankingHeightPct] = useState<number>(25);
+  const leftPanelRef = useRef<HTMLDivElement>(null);
 
-  const getMonthLabel = (monthIndex: number) => {
-    const month = monthIndex + 1;
-    return `${month}월`;
+  const [metrics, setMetrics] = useState(INITIAL_METRICS);
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
+
+  const handleDragSort = () => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    const _metrics = [...metrics];
+    const draggedItemContent = _metrics.splice(dragItem.current, 1)[0];
+    _metrics.splice(dragOverItem.current, 0, draggedItemContent);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setMetrics(_metrics);
   };
-  const monthLabels = Array.from({ length: 12 }, (_, index) => `${index + 1}월`);
-  const getSliderPercent = (monthIndex: number) => (monthIndex / MAX_MONTH_INDEX) * 100;
 
-  const selectedMonth = selectedMonthIndex + 1;
-  const selectedMonthLabel = getMonthLabel(selectedMonthIndex);
-  
-  const visitorData = useMemo(() => getProvinceVisitorTotals(selectedMonth), [selectedMonth]);
-  const subRegionVisitorData = useMemo(() => getDistrictVisitorTotals(currentViewLevel, selectedMonth), [currentViewLevel, selectedMonth]);
-  const provinceVisitorScaleMax = useMemo(() => getProvinceVisitorScaleMax(), []);
-  const subRegionVisitorScaleMax = useMemo(() => getDistrictVisitorScaleMax(currentViewLevel), [currentViewLevel]);
-  
-  const activeDisplayRegion = currentViewLevel === "national"
-    ? (hoveredRegion || selectedRegion || "seoul")
-    : (selectedSubRegion || currentViewLevel);
-  
-  const chartData = useMemo(() => {
-    const baseRegionId = currentViewLevel === "national" ? activeDisplayRegion : currentViewLevel;
-    const rawPercentages = getCountryPercentagesByRegion(activeDisplayRegion, baseRegionId, selectedSubRegionName, selectedMonth);
-    const totalVisitors = selectedSubRegion ? (subRegionVisitorData[selectedSubRegion] || 0) : (visitorData[activeDisplayRegion] || 0);
+  const weightMap = useMemo(() => {
+    const w: Record<string, number> = {};
+    metrics.forEach((m, idx) => {
+      w[m.id] = (5 - idx) / 15;
+    });
+    return w;
+  }, [metrics]);
 
-    return rawPercentages.map(item => ({
-      name: item.name,
-      percentage: item.percentage,
-      value: Math.floor((item.percentage / 100) * totalVisitors) || 0,
-    }));
-  }, [activeDisplayRegion, currentViewLevel, selectedSubRegion, selectedSubRegionName, selectedMonth, visitorData, subRegionVisitorData]);
+  const allDetailDataMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    regionsInfo.forEach((region) => {
+      const provData = getDetailOpportunityScores(region.id);
+      Object.entries(provData || {}).forEach(([districtName, datum]) => {
+        map[`${region.id}-${districtName}`] = datum;
+      });
+    });
+    return map;
+  }, []);
 
-  const companionPieData = useMemo(
-    () => {
-      const data = (highlightedCountry ? getCompanionAverageByCountry(highlightedCountry) : []);
-      return [...data].sort((a, b) => b.value - a.value);
-    },
-    [highlightedCountry, selectedMonth],
+  const calculateDynamicScores = useCallback((baseData: Record<string, any> | undefined) => {
+    const dynamicData: Record<string, any> = {};
+    if (!baseData) return dynamicData;
+    
+    const rawScores: { id: string; rawZ: number; datum: any }[] = [];
+
+    for (const [id, datum] of Object.entries(baseData)) {
+      if (!datum || !datum.nationalZ) continue;
+
+      const rawZ = 
+        (weightMap["growth"] * datum.nationalZ.growth) +
+        (weightMap["visitor"] * datum.nationalZ.visitor) +
+        (weightMap["spending"] * datum.nationalZ.spending) -
+        (weightMap["price"] * datum.nationalZ.price) -
+        (weightMap["competition"] * datum.nationalZ.accommodation);
+
+      rawScores.push({ id, rawZ, datum });
+    }
+
+    const rawZMean = rawScores.length 
+      ? rawScores.reduce((acc, curr) => acc + curr.rawZ, 0) / rawScores.length 
+      : 0;
+    const rawZStd = rawScores.length 
+      ? Math.sqrt(rawScores.reduce((acc, curr) => acc + Math.pow(curr.rawZ - rawZMean, 2), 0) / rawScores.length) || 1
+      : 1;
+
+    for (const item of rawScores) {
+      const finalZ = (item.rawZ - rawZMean) / rawZStd; 
+      dynamicData[item.id] = {
+        ...item.datum,
+        opportunityScore: zToPercentileScore(finalZ) 
+      };
+    }
+
+    return dynamicData;
+  }, [weightMap]);
+
+  const dynamicMainOpportunityData = useMemo(() => {
+    const baseData = getMainOpportunityScores();
+    return calculateDynamicScores(baseData);
+  }, [calculateDynamicScores]);
+
+  const dynamicAllDetailOpportunityData = useMemo(() => {
+    return calculateDynamicScores(allDetailDataMap);
+  }, [calculateDynamicScores, allDetailDataMap]);
+
+  const dynamicDetailOpportunityData = useMemo(() => {
+    if (currentViewLevel === "national") return {};
+    const provinceData: Record<string, any> = {};
+    Object.entries(dynamicAllDetailOpportunityData || {}).forEach(([compositeKey, datum]) => {
+      if (compositeKey.startsWith(`${currentViewLevel}-`)) {
+        const districtName = compositeKey.replace(`${currentViewLevel}-`, "");
+        provinceData[districtName] = datum;
+      }
+    });
+    return provinceData;
+  }, [currentViewLevel, dynamicAllDetailOpportunityData]);
+
+  const currentDataMap = currentViewLevel === "national" ? dynamicMainOpportunityData : dynamicDetailOpportunityData;
+  
+  const sortedRanking = useMemo(() => {
+    const safeDataMap = currentDataMap || {};
+    return Object.entries(safeDataMap)
+      .map(([id, data]) => ({
+        id,
+        name: data?.districtName || data?.provinceName || id || "알 수 없음",
+        score: Number(data?.opportunityScore) || 0,
+      }))
+      .sort((a, b) => b.score - a.score);
+  }, [currentDataMap]);
+
+  const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
+  const compareScatterPointIds = useMemo(
+    () => compareRegions.map((region) => `${region.provinceId}-${region.id}`),
+    [compareRegions],
+  );
+  const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
+
+  const shouldMountInlineCompare = compareRegions.length === 3;
+  const showInlineCompare = shouldMountInlineCompare && !inlineCompareDismissed;
+
+  useEffect(() => {
+    setInlineCompareDismissed(false);
+  }, [compareRegions.length]);
+
+  useEffect(() => {
+    if (!showInlineCompare) {
+      setInlineCompareVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setInlineCompareVisible(true), 20);
+    return () => window.clearTimeout(timer);
+  }, [showInlineCompare]);
+
+  const handleBrushSelect = useCallback((ids: string[]) => {
+    setBrushedPointIds(ids);
+  }, []);
+
+  const brushedProvinceIds = useMemo(
+    () => [...new Set(brushedPointIds.map((id) => splitScatterPointId(id).provinceId))],
+    [brushedPointIds],
   );
 
-  const showAccommodation = currentViewLevel !== "national";
-  const compareRegionIds = useMemo(() => compareRegions.map((region) => region.id), [compareRegions]);
-  const currentProvinceName = regionsInfo.find((region) => region.id === currentViewLevel)?.name || "";
+  const brushedSubRegionIds = useMemo(
+    () =>
+      brushedPointIds
+        .map((id) => splitScatterPointId(id))
+        .filter((parts) => parts.provinceId === currentViewLevel && parts.subRegionId)
+        .map((parts) => parts.subRegionId as string),
+    [brushedPointIds, currentViewLevel],
+  );
+
+  useEffect(() => {
+    setBrushedPointIds([]);
+  }, [currentViewLevel]);
+
+  const toggleCompareRegion = (subId: string, subName: string) => {
+    setCompareRegions((prev) => {
+      if (prev.some((region) => region.id === subId)) {
+        return prev.filter((region) => region.id !== subId);
+      }
+      if (prev.length >= 3) return prev;
+      return [...prev, { id: subId, name: subName, provinceId: currentViewLevel, provinceName: currentProvinceName }];
+    });
+  };
 
   const handleSubRegionSelect = (subId: string, subName: string) => {
     const isSameSelected = selectedSubRegion === subId || selectedSubRegionName === subName;
@@ -133,327 +231,358 @@ export function MainPage() {
     setSelectedSubRegionName(isSameSelected ? null : subName);
 
     if (!isCompareMode) return;
-
-    setCompareRegions((prev) => {
-      if (prev.some((region) => region.id === subId)) return prev.filter((region) => region.id !== subId);
-      if (prev.length >= 3) return prev;
-      return [...prev, { id: subId, name: subName, provinceId: currentViewLevel, provinceName: currentProvinceName }];
-    });
+    toggleCompareRegion(subId, subName);
   };
 
   const removeCompareRegion = (regionId: string) => {
     setCompareRegions((prev) => prev.filter((region) => region.id !== regionId));
   };
 
-  const goToComparePage = () => {
-    if (compareRegions.length < 2 || isCompareLaunching) return;
-    setIsCompareClosing(false);
-    setIsCompareLaunching(true);
+  const resetSubRegionState = () => {
+    setSelectedSubRegion(null);
+    setSelectedSubRegionName(null);
+    setHoveredSubRegion(null);
   };
 
-  const closeComparePage = () => {
-    setIsCompareClosing(true);
-    window.setTimeout(() => {
-      setIsCompareLaunching(false);
-      setIsCompareClosing(false);
-    }, 520);
+  const handleScatterHover = (item: { id: string } | null) => {
+    if (currentViewLevel === "national") {
+      if (item) {
+        const { provinceId } = splitScatterPointId(item.id);
+        setHoveredRegion(provinceId);
+      } else {
+        setHoveredRegion(null);
+      }
+      setHoveredSubRegion(null);
+      return;
+    }
+    const { provinceId, subRegionId } = item ? splitScatterPointId(item.id) : { provinceId: "", subRegionId: null };
+    setHoveredSubRegion(provinceId === currentViewLevel ? subRegionId : null);
   };
 
-  const handlePointerDown = () => (e: React.PointerEvent) => {
+  const handleScatterClick = (item: { id: string; name: string }) => {
+    const { provinceId, subRegionId } = splitScatterPointId(item.id);
+
+    if (currentViewLevel === "national") {
+      setSelectedRegion(provinceId);
+      resetSubRegionState();
+      setCurrentViewLevel(provinceId);
+      return;
+    }
+
+    if (!subRegionId || provinceId !== currentViewLevel) return;
+
+    if (isCompareMode) {
+      resetSubRegionState();
+      toggleCompareRegion(subRegionId, item.name);
+      return;
+    }
+    handleSubRegionSelect(subRegionId, item.name);
+  };
+
+  const handleResizeDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    const sliderEl = e.currentTarget.parentElement;
-    if (!sliderEl) return;
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const rect = sliderEl.getBoundingClientRect();
-      let percent = ((moveEvent.clientX - rect.left) / rect.width) * 100;
-      percent = Math.max(0, Math.min(100, percent));
-      setSelectedMonthIndex(Math.round((percent / 100) * MAX_MONTH_INDEX));
-    };
-    const onPointerUp = () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-    };
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-  };
 
-  const handleBarLeave = () => setHighlightedCountry(null);
+    const handleMouseMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!leftPanelRef.current) return;
+      const containerRect = leftPanelRef.current.getBoundingClientRect();
+      const clientY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
+      
+      const newHeightPx = containerRect.bottom - clientY;
+      const newHeightPct = (newHeightPx / containerRect.height) * 100;
+
+      setRankingHeightPct(Math.min(Math.max(newHeightPct, 13), 85));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleMouseMove);
+      document.removeEventListener('touchend', handleMouseUp);
+      document.body.style.cursor = 'default';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('touchmove', handleMouseMove, { passive: false });
+    document.addEventListener('touchend', handleMouseUp);
+    
+    document.body.style.cursor = 'row-resize';
+  }, []);
 
   return (
     <div className="relative w-full h-screen bg-gray-100 flex overflow-hidden">
-      <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
-        <button
-          onClick={goToComparePage}
-          disabled={compareRegions.length < 2}
-          className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-blue-500 disabled:opacity-35 disabled:hover:border-gray-200 disabled:cursor-not-allowed"
-        >
-          <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-blue-600 transition-transform group-hover:-translate-x-0.5" />
-        </button>
-      </div>
-
-      {isCompareLaunching && (
-        <div className={`fixed inset-0 z-[80] bg-gray-100 shadow-2xl overflow-y-auto overscroll-contain ${isCompareClosing ? "animate-[compare-slide-dismiss_520ms_ease-out_forwards]" : "animate-[compare-slide-cover_520ms_ease-out_forwards]"}`}>
-          <ComparePage regionsOverride={compareRegions} embedded onClose={closeComparePage} />
+      {shouldMountInlineCompare && !showInlineCompare && (
+        <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50">
+          <button
+            type="button"
+            onClick={() => setInlineCompareDismissed(false)}
+            className="group h-16 w-7 bg-white/95 shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-y border-l border-gray-200 hover:border-[#8b5cf6]"
+            title="비교 패널 다시 열기"
+          >
+            <span className="w-0 h-0 border-y-[9px] border-y-transparent border-r-[13px] border-r-[#8b5cf6] transition-transform group-hover:-translate-x-0.5" />
+          </button>
         </div>
       )}
 
-      {/* 지도 영역 */}
-      <div className="absolute left-[1.5%] top-1/2 -translate-y-1/2 w-[45.5%] h-[94%] bg-white rounded-2xl shadow-lg border-[0.5px] border-gray-200 overflow-hidden">
-        <div className="absolute right-5 top-5 z-40 flex flex-col items-end gap-3">
-          <button
-            onClick={() => setIsCompareMode((prev) => !prev)}
-            className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${isCompareMode ? "bg-emerald-500 border-emerald-400" : "bg-white border-gray-200 hover:border-emerald-500"}`}
-          >
-            <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-emerald-600"}`} />
-            {compareRegions.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
-                {compareRegions.length}
-              </span>
-            )}
-          </button>
+      {/* 좌측 패널 (지도 + 랭킹 바 차트) */}
+      <div 
+        ref={leftPanelRef}
+        className="absolute left-[1.5%] top-1/2 -translate-y-1/2 w-[45.5%] h-[94%] bg-white rounded-2xl shadow-lg border-[0.5px] border-gray-200 overflow-hidden flex flex-col"
+      >
+        
+        {/* 상단: 지도 영역 */}
+        <div className="relative flex-1 min-h-0 bg-transparent">
+          <div className="absolute right-5 top-5 z-40 flex items-start gap-3">
+            <div className="relative flex flex-col items-end">
+              <button
+                type="button"
+                onClick={() => setIsRankOpen((prev) => !prev)}
+                className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+                  isRankOpen ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
+                }`}
+                title="평가 지표 가중치 설정"
+              >
+                <SlidersHorizontal className={`w-6 h-6 ${isRankOpen ? "text-white" : "text-[#8b5cf6]"}`} />
+              </button>
 
-          {isCompareMode && (
-            <div className="w-36 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-emerald-100 p-3">
-              <div className="flex justify-end mb-2">
-                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{compareRegions.length}/3</span>
-              </div>
-              <div className="space-y-1.5">
-                {compareRegions.length === 0 ? (
-                  <p className="text-[11px] text-gray-500 leading-4">지도에서 선택</p>
-                ) : (
-                  compareRegions.map((region) => (
-                    <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
-                        <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeCompareRegion(region.id);
-                        }}
-                        className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                        aria-label={`${region.name} 비교 지역에서 제거`}
-                        title="비교 지역에서 제거"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {currentViewLevel === "national" ? (
-          <KoreaMap
-            onRegionClick={(id) => {
-              setSelectedRegion(id);
-              setSelectedSubRegion(null);
-              setSelectedSubRegionName(null); 
-              setHoveredSubRegion(null);
-            }}
-            onRegionHover={setHoveredRegion}
-            onRegionDoubleClick={(id) => {
-              setSelectedRegion(id);
-              setSelectedSubRegion(null);
-              setSelectedSubRegionName(null); 
-              setHoveredSubRegion(null);
-              setCurrentViewLevel(id);
-            }}
-            selectedRegion={selectedRegion}
-            visitorData={visitorData}
-            colorScaleMax={provinceVisitorScaleMax}
-          />
-        ) : (
-          <DetailRegionMap 
-            regionId={currentViewLevel}
-            onBack={() => {
-              setCurrentViewLevel("national");
-              setSelectedSubRegion(null);
-              setSelectedSubRegionName(null);
-              setHoveredSubRegion(null);
-            }}
-            visitorData={subRegionVisitorData}
-            colorScaleMax={subRegionVisitorScaleMax}
-            onSubRegionClick={handleSubRegionSelect}
-            onSubRegionHover={setHoveredSubRegion}
-            selectedSubRegion={selectedSubRegion}
-            externalHoveredSubRegion={hoveredSubRegion}
-            selectedCompareSubRegions={compareRegionIds}
-          />
-        )}
-      </div>
-
-      {/* 우측 패널 */}
-      <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
-        {!showAccommodation && (
-          <div className="bg-white rounded-xl shadow-lg px-5 py-4 border-[0.5px] border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-gray-800">월 선택</h3>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="bg-blue-600 text-white font-bold px-3 py-1.5 rounded-md shadow-sm">{selectedMonthLabel}</span>
-                <span className="text-gray-500 font-semibold">2023-2025 평균</span>
-              </div>
-            </div>
-            <div className="px-2">
-              <div className="relative w-full h-7 mb-2">
-                <div className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 bg-gray-200 rounded-full" />
-                {monthLabels.map((label, index) => (
-                  <button
-                    key={label}
-                    type="button"z
-                    onClick={() => setSelectedMonthIndex(index)}
-                    onMouseEnter={() => setHoveredMonthIndex(index)}
-                    onMouseLeave={() => setHoveredMonthIndex(null)}
-                    className={`absolute top-1/2 w-3 h-3 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all ${index === selectedMonthIndex ? "bg-blue-600 border-blue-600 scale-125" : index === hoveredMonthIndex ? "bg-sky-500 border-sky-500 scale-110" : "bg-white border-gray-300"}`}
-                    style={{ left: `${getSliderPercent(index)}%` }}
-                  />
-                ))}
-                <div
-                  className="absolute top-1/2 w-6 h-6 -translate-y-1/2 bg-white border-[3px] border-blue-600 rounded-full shadow-md cursor-grab active:cursor-grabbing z-10 touch-none transition-[left] duration-150"
-                  style={{ left: `calc(${getSliderPercent(selectedMonthIndex)}% - 12px)` }}
-                  onPointerDown={handlePointerDown()}
-                />
-              </div>
-              <div className="relative h-8">
-                {monthLabels.map((label, index) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setSelectedMonthIndex(index)}
-                    onMouseEnter={() => setHoveredMonthIndex(index)}
-                    onMouseLeave={() => setHoveredMonthIndex(null)}
-                    className={`absolute top-0 w-9 h-8 -translate-x-1/2 rounded-md text-[11px] font-bold transition-colors ${index === selectedMonthIndex ? "bg-blue-600 text-white shadow-sm" : index === hoveredMonthIndex ? "bg-sky-500 text-white" : "text-gray-500 hover:bg-gray-100"}`}
-                    style={{ left: `${getSliderPercent(index)}%` }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex gap-4 min-h-0 relative">
-          {showAccommodation ? (
-            <InfrastructureScatterPlot
-              currentViewLevel={currentViewLevel}
-              selectedRegion={selectedRegion}
-              selectedSubRegion={selectedSubRegion}
-              selectedSubRegionName={selectedSubRegionName}
-              hoveredSubRegion={hoveredSubRegion}
-              regionsInfo={regionsInfo}
-              onDataPointHover={(item) => setHoveredSubRegion(item?.id ?? null)}
-              onDataPointClick={(item) => {
-                if (currentViewLevel === "national") {
-                  setSelectedRegion(item.id);
-                  setSelectedSubRegion(null);
-                  setSelectedSubRegionName(null);
-                  setCurrentViewLevel(item.id);
-                  return;
-                }
-                handleSubRegionSelect(item.id, item.name);
-              }}
-            />
-          ) : (
-            <>
-              {/* 차트 1: Top 10 방문 국가 */}
-              <div className="flex-1 bg-white rounded-xl shadow-lg p-6 border-[0.25px] border-gray-100 flex flex-col">
-                <h3 className="text-base font-bold text-gray-800 mb-5 flex items-center justify-between">
-                  <span>Top 10 방문 국가</span>
-                  <span className="text-xs font-normal text-blue-600 bg-blue-50 px-2.5 py-1 rounded">
-                    {selectedSubRegionName ? selectedSubRegionName : (regionsInfo.find(r => r.id === activeDisplayRegion)?.name || '상세 구역')} 기준
-                  </span>
-                </h3>
-                <div className="flex-1 w-full min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} layout="vertical" margin={{ top: 6, left: 8, right: 10, bottom: 6 }} barCategoryGap={4}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(v) => v.toLocaleString()} style={{ fontSize: "12px" }} />
-                      
-                      <YAxis type="category" dataKey="name" tick={<CountryYAxisTick />} width={90} interval={0} />
-                      <Tooltip
-                        cursor={{ fill: 'rgb(0, 0, 0, 0.05)' }}
-                        contentStyle={{ borderRadius: '8px', border: 'none', fontSize: '12px' }}
-                        formatter={(value: number, name: string, props: any) => [`${value.toLocaleString()}명 (${props.payload?.percentage || 0}%)`, '방문객 수']}
-                      />
-                      <Bar
-                        dataKey="value"
-                        radius={[0, 4, 4, 0]}
-                        animationDuration={300}
-                        onMouseEnter={(d: { name?: string }) => d?.name && setHighlightedCountry(d.name)}
-                        onMouseLeave={handleBarLeave}
-                      >
-                        {chartData.map((entry) => {
-                          const meta = getCountryMeta(entry.name);
-                          const baseColor = CONTINENT_COLORS[meta.continent];
-                          const fill = highlightedCountry && highlightedCountry !== entry.name ? `${baseColor}33` : baseColor;
-                          return <Cell key={entry.name} fill={fill} />;
-                        })}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                
-                {/* 대륙 색상 범례 */}
-                <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 justify-center text-[10px] text-gray-500">
-                   {Object.entries(CONTINENT_COLORS).filter(([k]) => k !== "기타").map(([continent, color]) => (
-                     <div key={continent} className="flex items-center gap-1">
-                       <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
-                       <span>{continent}</span>
-                     </div>
-                   ))}
-                </div>
-              </div>
-
-              {/* 차트 2: 파이차트 */}
-              {highlightedCountry && companionPieData.length > 0 && (
-                <div className="absolute right-6 bottom-[4.45rem] z-50 w-[260px] h-[250px] rounded-xl border border-gray-200 bg-white/95 shadow-2xl p-3 pointer-events-none">
-                  <div className="mb-1">
-                    <p className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                      {getCountryMeta(highlightedCountry).countryCode && (
-                        <img 
-                          src={`https://flagcdn.com/w20/${getCountryMeta(highlightedCountry).countryCode}.png`} 
-                          alt="flag" 
-                          className="w-4 h-[11px] rounded-sm object-cover shadow-[0_0_2px_rgba(0,0,0,0.2)]" 
-                        />
-                      )}
-                      <span>{highlightedCountry}</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500">{selectedMonth}월 · 2023/2024 평균</p>
+              {isRankOpen && (
+                <div className="absolute top-16 right-0 w-64 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-4">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                      평가 지표 우선순위
+                    </h4>
+                    <button onClick={() => setIsRankOpen(false)} className="text-gray-400 hover:text-gray-600">
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  <ResponsiveContainer width="100%" height="86%">
-                    <PieChart>
-                      <Pie
-                        data={companionPieData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius="50%"
-                        outerRadius="82%"
-                        paddingAngle={2}
-                        stroke="#ffffff"
-                        strokeWidth={2}
-                        startAngle={90}
-                        endAngle={-270}
-                        animationDuration={300}
+                  <p className="text-[10px] text-gray-500 mb-3 leading-snug">
+                    드래그하여 중요도를 변경하면 점수가 실시간으로 재계산됩니다.
+                  </p>
+                  <div className="space-y-2">
+                    {metrics.map((metric, index) => (
+                      <div
+                        key={metric.id}
+                        draggable
+                        onDragStart={() => (dragItem.current = index)}
+                        onDragEnter={() => (dragOverItem.current = index)}
+                        onDragEnd={handleDragSort}
+                        onDragOver={(e) => e.preventDefault()}
+                        className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-2 cursor-grab active:cursor-grabbing hover:border-[#8b5cf6] transition-colors group"
                       >
-                        {companionPieData.map((entry: CompanionDatum) => (
-                          <Cell key={entry.name} fill={COMPANION_COLORS[entry.name]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value: number, name: string, props: { payload?: CompanionDatum }) => [`${Number(value).toFixed(1)}% (${props.payload?.rawValue.toFixed(1)}%)`, name]} />
-                      <Legend verticalAlign="bottom" iconSize={8} wrapperStyle={{ fontSize: "10px", lineHeight: "14px" }} />
-                    </PieChart>
-                  </ResponsiveContainer>
+                        <div className="flex items-center gap-2">
+                          <Menu className="w-4 h-4 text-gray-400 group-hover:text-[#8b5cf6] shrink-0" />
+                          <div className="flex items-center justify-center w-5 h-5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6] text-[10px] font-bold shrink-0">
+                            {index + 1}
+                          </div>
+                          <span className="text-xs font-semibold text-gray-700 truncate">{metric.label}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-            </>
+            </div>
+
+            <div className="relative flex flex-col items-end">
+              <button
+                type="button"
+                onClick={() => setIsCompareMode((prev) => !prev)}
+                className={`relative w-14 h-14 rounded-full shadow-lg hover:shadow-2xl transition-all flex items-center justify-center border-2 ${
+                  isCompareMode ? "bg-[#8b5cf6] border-[#8b5cf6]" : "bg-white border-gray-200 hover:border-[#8b5cf6]"
+                }`}
+                title="비교 모드 켜기/끄기"
+              >
+                <ShoppingCart className={`w-7 h-7 ${isCompareMode ? "text-white" : "text-[#8b5cf6]"}`} />
+                {compareRegions.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center ring-2 ring-white">
+                    {compareRegions.length}
+                  </span>
+                )}
+              </button>
+
+              {isCompareMode && (
+                <div className="absolute top-16 right-0 w-44 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-3">
+                  <div className="flex justify-end mb-2">
+                    <span className="text-[11px] font-bold text-[#8b5cf6] bg-[#8b5cf6]/10 px-2 py-0.5 rounded-full">
+                      {compareRegions.length}/3
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {compareRegions.length === 0 ? (
+                      <p className="text-[11px] text-gray-500 leading-4 text-center py-2">지도에서 선택하세요</p>
+                    ) : (
+                      compareRegions.map((region) => (
+                        <div key={region.id} className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5">
+                          <Check className="w-3.5 h-3.5 text-[#8b5cf6] shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-gray-800 truncate">{region.name}</p>
+                            <p className="text-[10px] text-gray-500 truncate">{region.provinceName}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeCompareRegion(region.id);
+                            }}
+                            className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {currentViewLevel === "national" ? (
+            <KoreaMap
+              onRegionHover={setHoveredRegion}
+              onRegionClick={(id) => {
+                setSelectedRegion(id);
+                resetSubRegionState();
+                setCurrentViewLevel(id);
+              }}
+              selectedRegion={selectedRegion}
+              externalHoveredRegion={hoveredRegion}
+              opportunityData={dynamicMainOpportunityData}
+              brushedRegions={brushedProvinceIds}
+            />
+          ) : (
+            <DetailRegionMap
+              regionId={currentViewLevel}
+              onBack={() => {
+                setCurrentViewLevel("national");
+                resetSubRegionState();
+              }}
+              opportunityData={dynamicDetailOpportunityData}
+              onSubRegionClick={handleSubRegionSelect}
+              onSubRegionHover={setHoveredSubRegion}
+              selectedSubRegion={selectedSubRegion}
+              externalHoveredSubRegion={hoveredSubRegion}
+              selectedCompareSubRegions={compareRegionIds}
+              brushedSubRegions={brushedSubRegionIds}
+            />
           )}
         </div>
+
+        {/* ✅ 리사이저 (위아래 드래그 핸들) */}
+        <div 
+          onMouseDown={handleResizeDragStart}
+          onTouchStart={handleResizeDragStart}
+          className="w-full h-[6px] bg-gray-50 hover:bg-gray-200 cursor-row-resize flex items-center justify-center border-y border-gray-200 transition-colors z-10 shrink-0"
+        >
+          <div className="w-8 h-1 rounded-full bg-gray-300 pointer-events-none" />
+        </div>
+
+        {/* 하단: 바 차트 (입지기회도 순위 리스트) */}
+        <div 
+          className="shrink-0 bg-white flex flex-col"
+          style={{ height: `${rankingHeightPct}%` }}
+        >
+          <div className="px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-slate-50/80">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+              🏆 입지기회도 순위
+              <span className="text-[11px] font-semibold text-gray-500 bg-white px-2 py-0.5 rounded-md border border-gray-200">
+                {currentProvinceName || "전국"}
+              </span>
+            </h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {sortedRanking.map((item, index) => {
+              const isHovered = currentViewLevel === "national" ? hoveredRegion === item.id : hoveredSubRegion === item.id;
+              const isSelected = currentViewLevel === "national" ? selectedRegion === item.id : selectedSubRegion === item.id;
+              
+              // ✅ 지도 히트맵에 쓰이는 색상을 추출
+              const barColor = getHeatmapColorFromRatio(Math.max(0, Math.min(100, item.score)) * 0.01);
+              
+              return (
+                <div
+                  key={item.id}
+                  className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all ${
+                    isSelected ? "bg-amber-50 border border-amber-200" :
+                    isHovered ? "bg-slate-100" : "hover:bg-slate-50 border border-transparent"
+                  }`}
+                  onMouseEnter={() => currentViewLevel === "national" ? setHoveredRegion(item.id) : setHoveredSubRegion(item.id)}
+                  onMouseLeave={() => currentViewLevel === "national" ? setHoveredRegion(null) : setHoveredSubRegion(null)}
+                  onClick={() => {
+                    if (currentViewLevel === "national") {
+                      setSelectedRegion(item.id);
+                      resetSubRegionState();
+                      setCurrentViewLevel(item.id);
+                    } else {
+                      handleSubRegionSelect(item.id, item.name);
+                    }
+                  }}
+                >
+                  <div className="w-6 text-center shrink-0">
+                    <span 
+                      className={`text-xs font-black ${index < 3 ? '' : 'text-gray-400'}`}
+                      style={{ color: index < 3 ? barColor : undefined }} // 상위 3위는 바 색상과 동일하게 포인트 부여
+                    >
+                      {index + 1}
+                    </span>
+                  </div>
+                  <div className={`w-16 shrink-0 text-xs truncate ${isSelected ? 'font-black text-amber-900' : 'font-bold text-gray-700'}`}>
+                    {item.name}
+                  </div>
+                  <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden flex items-center">
+                    <div 
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ 
+                        width: `${Math.max(0, Math.min(100, item.score))}%`,
+                        backgroundColor: barColor // ✅ 바 색상을 지도 히트맵과 완전히 일치시킴
+                      }} 
+                    />
+                  </div>
+                  <div className={`w-10 text-right shrink-0 text-xs font-black tabular-nums ${isSelected ? 'text-amber-700' : 'text-gray-800'}`}>
+                    {item.score.toFixed(1)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 우측 패널 (산점도 + 비교 패널) */}
+      <div className="absolute right-[1.5%] top-1/2 -translate-y-1/2 w-[50.5%] h-[94%] flex flex-col gap-4">
+        <div className="flex-1 min-h-0 relative">
+          <InfrastructureScatterPlot
+            currentViewLevel={currentViewLevel}
+            selectedRegion={currentViewLevel === "national" ? "national" : currentViewLevel}
+            selectedSubRegion={selectedSubRegion}
+            selectedSubRegionName={selectedSubRegionName}
+            hoveredSubRegion={hoveredSubRegion}
+            hoveredProvinceId={currentViewLevel === "national" ? hoveredRegion : null}
+            regionsInfo={regionsInfo}
+            selectedComparePointIds={compareScatterPointIds}
+            isCompareMode={isCompareMode}
+            opportunityDataByPoint={dynamicAllDetailOpportunityData}
+            onDataPointHover={handleScatterHover}
+            onDataPointClick={handleScatterClick}
+            onBrushSelect={handleBrushSelect}
+            brushedIds={brushedPointIds}
+          />
+        </div>
+
+        {shouldMountInlineCompare && (
+          <div
+            className={`absolute inset-0 z-30 transition-transform duration-500 ease-out ${
+              showInlineCompare && inlineCompareVisible
+                ? "translate-x-0"
+                : "translate-x-[105%] pointer-events-none"
+            }`}
+          >
+            <InlineComparePanel
+              regions={compareRegions}
+              weightMap={weightMap}
+              onClose={() => setInlineCompareDismissed(true)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

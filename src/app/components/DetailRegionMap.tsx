@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   HEATMAP_GRADIENT,
-  formatVisitorsInMan,
-  getHeatmapColor,
+  getHeatmapColorFromRatio,
 } from "../data/heatmapPalette";
+import type { OpportunityDatum } from "../data/opportunityData";
 import SeoulSvg from "../../imports/simple/sl.svg?raw";
 import BusanSvg from "../../imports/simple/bs.svg?raw";
 import GyeonggiSvg from "../../imports/simple/gg.svg?raw";
@@ -37,6 +37,8 @@ const regionNames: Record<string, string> = {
   daegu: "대구", gyeongnam: "경남", ulsan: "울산", busan: "부산", jeju: "제주"
 };
 
+const REGION_COLORS = ["#0f766e", "#facc15", "#111827"];
+
 const getSvgAttribute = (tag: string, attribute: string) => {
   const match = tag.match(new RegExp(`${attribute}="([^"]+)"`));
   return match?.[1] || "";
@@ -45,18 +47,19 @@ const getSvgAttribute = (tag: string, attribute: string) => {
 interface DetailRegionMapProps {
   regionId: string;
   onBack: () => void;
-  visitorData: Record<string, number>;
-  colorScaleMax: number;
+  opportunityData: Record<string, OpportunityDatum>;
   onSubRegionClick: (subId: string, subName: string) => void; 
   onSubRegionHover?: (subId: string | null) => void;
   selectedSubRegion: string | null;
   externalHoveredSubRegion?: string | null;
   selectedCompareSubRegions?: string[];
+  brushedSubRegions?: string[];
 }
 
-export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [] }: DetailRegionMapProps) {
+export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegionClick, onSubRegionHover, selectedSubRegion, externalHoveredSubRegion = null, selectedCompareSubRegions = [], brushedSubRegions = [] }: DetailRegionMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number }[]>([]);
+  
+  const [checkMarkers, setCheckMarkers] = useState<{ id: string; x: number; y: number; color: string }[]>([]);
   const [hoveredSubRegion, setHoveredSubRegion] = useState<string | null>(null);
 
   const svgContent = useMemo(() => {
@@ -78,7 +81,6 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   }, [svgContent]);
 
   const subRegionIds = useMemo(() => Object.keys(subRegionMap), [subRegionMap]);
-  const subRegionData = visitorData;
   const activeHoveredSubRegion = hoveredSubRegion || externalHoveredSubRegion;
 
   const updateHoveredSubRegion = (id: string | null) => {
@@ -97,33 +99,42 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       }
     };
 
-    if (activeHoveredSubRegion) bringToFront(activeHoveredSubRegion); 
-    if (selectedCompareSubRegions.length > 0) selectedCompareSubRegions.forEach(bringToFront); 
-    if (selectedSubRegion) bringToFront(selectedSubRegion); 
+    brushedSubRegions.forEach(bringToFront);
+    if (activeHoveredSubRegion) bringToFront(activeHoveredSubRegion);
+    if (selectedCompareSubRegions.length > 0) selectedCompareSubRegions.forEach(bringToFront);
+    if (selectedSubRegion) bringToFront(selectedSubRegion);
 
-  }, [selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, svgContent]);
+  }, [selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, brushedSubRegions, svgContent]);
 
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
-      const visitors = subRegionData[id] || 0;
-      const heatmapColor = getHeatmapColor(visitors, colorScaleMax);
+      const score = opportunityData[id]?.opportunityScore;
+      const heatmapColor = getHeatmapColorFromRatio(
+        typeof score === "number" ? score * 0.01 : undefined,
+      );
       const isSelected = selectedSubRegion === id;
-      const isCompareSelected = selectedCompareSubRegions.includes(id);
+      
+      const compareIndex = selectedCompareSubRegions.indexOf(id);
+      const isCompareSelected = compareIndex !== -1;
       const isHovered = activeHoveredSubRegion === id;
+      const isBrushed = brushedSubRegions.includes(id);
 
       let strokeColor = "#ffffff";
       let strokeWidth = "0.5px";
-
+      // 우선순위: hover > brushed > compare > selected
       if (isHovered) {
-        strokeColor = "#c17aab"; 
+        strokeColor = "#ab418f";
+        strokeWidth = "2.5px";
+      } else if (isBrushed) {
+        strokeColor = "#f97316";
         strokeWidth = "3px";
       } else if (isCompareSelected) {
-        strokeColor = "#16a34a"; 
-        strokeWidth = "3px";
+        strokeColor = REGION_COLORS[compareIndex];
+        strokeWidth = "2.5px";
       } else if (isSelected) {
-        strokeColor = "#c1907a"; 
-        strokeWidth = "3px";
+        strokeColor = "#415aab";
+        strokeWidth = "2px";
       }
 
       styles += `
@@ -138,7 +149,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
       `;
     });
     return styles;
-  }, [subRegionData, selectedSubRegion, colorScaleMax, selectedCompareSubRegions, activeHoveredSubRegion, subRegionIds]);
+  }, [opportunityData, selectedSubRegion, selectedCompareSubRegions, activeHoveredSubRegion, brushedSubRegions, subRegionIds]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -147,7 +158,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
       const containerRect = container.getBoundingClientRect();
       const markers = selectedCompareSubRegions
-        .map((id) => {
+        .map((id, index) => { 
           const regionElement = container.querySelector<SVGGraphicsElement>(`[id="${id}"]`);
           if (!regionElement) return null;
 
@@ -156,9 +167,10 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
             id,
             x: rect.left + rect.width / 2 - containerRect.left,
             y: rect.top + rect.height / 2 - containerRect.top,
+            color: REGION_COLORS[index], 
           };
         })
-        .filter((marker): marker is { id: string; x: number; y: number } => Boolean(marker));
+        .filter((marker): marker is { id: string; x: number; y: number; color: string } => Boolean(marker));
 
       setCheckMarkers(markers);
     });
@@ -180,6 +192,7 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
   };
 
   const currentRegionId = activeHoveredSubRegion || selectedSubRegion;
+  const currentOpportunity = currentRegionId ? opportunityData[currentRegionId] : null;
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-5 bg-transparent overflow-hidden">
@@ -194,8 +207,8 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
             {currentRegionId ? subRegionMap[currentRegionId] : "구역을 선택하세요"}
           </p>
           <p className="text-3xl font-black text-blue-600 tracking-tight">
-            {currentRegionId ? subRegionData[currentRegionId]?.toLocaleString() : "0"}
-            <span className="text-base text-gray-600 font-medium ml-1">명</span>
+            {currentOpportunity?.opportunityScore.toFixed(1) ?? "-"}
+            <span className="text-base text-gray-600 font-medium ml-1">점</span>
           </p>
         </div>
       </div>
@@ -213,8 +226,12 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
         {checkMarkers.map((marker) => (
           <div
             key={marker.id}
-            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500 text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black"
-            style={{ left: marker.x, top: marker.y }}
+            className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full text-white shadow-lg ring-4 ring-white flex items-center justify-center text-lg font-black transition-colors duration-300"
+            style={{ 
+              left: marker.x, 
+              top: marker.y,
+              backgroundColor: marker.color 
+            }}
           >
             ✓
           </div>
@@ -223,15 +240,15 @@ export function DetailRegionMap({ regionId, onBack, visitorData, colorScaleMax, 
 
       {/* 범례 */}
       <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-3 py-2.5 rounded-lg shadow-lg border border-gray-100 pointer-events-none z-20">
-        <p className="text-[10px] font-bold text-gray-700 mb-2">외국인 방문자수</p>
+        <p className="text-[10px] font-bold text-gray-700 mb-2">입지 기회도</p>
         <div className="flex items-stretch gap-2.5">
           <div
             className="w-3 h-[106px] rounded-full border border-slate-200"
             style={{ background: HEATMAP_GRADIENT }}
           />
           <div className="flex h-[106px] flex-col justify-between text-[10px] font-semibold text-gray-600">
-            <span>{formatVisitorsInMan(colorScaleMax)}</span>
-            <span>0명</span>
+            <span>100점 (최적)</span>
+            <span>0점</span>
           </div>
         </div>
       </div>

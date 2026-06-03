@@ -1,4 +1,5 @@
 import countryRatioCsvRaw from "../../data/country_ratio.csv?raw";
+import nationalityCsvRaw from "../../data/nationality.csv?raw";
 import { provinceIdToCsvName } from "./visitorData";
 
 interface CountryRatioRow {
@@ -69,4 +70,40 @@ export function getCountryPercentagesByRegion(
     }))
     .sort((a, b) => b.percentage - a.percentage)
     .slice(0, 10);
+}
+
+// ── 시군구 단위 국적 구성 (nationality.csv) ──────────────────────────────
+export interface DistrictNationality {
+  country: string;
+  percentage: number;
+}
+
+// provinceName|districtName → [{country, percentage}] (비율 내림차순)
+const districtNationalityMap: Record<string, DistrictNationality[]> = (() => {
+  const map: Record<string, DistrictNationality[]> = {};
+  const rows = nationalityCsvRaw.trim().split(/\r?\n/).slice(1);
+  for (const line of rows) {
+    const cols = line.split(",");
+    const province = cols[0]?.trim();
+    const district = cols[1]?.trim();
+    const country = cols[2]?.trim();
+    if (!province || !district || !country) continue;
+    const key = `${province}|${district}`;
+    (map[key] ||= []).push({ country, percentage: parseNumber(cols[3]) });
+  }
+  Object.values(map).forEach((arr) => arr.sort((a, b) => b.percentage - a.percentage));
+  return map;
+})();
+
+/**
+ * 시군구 단위 외국인 국적 구성 비율(내림차순). 데이터 없으면 빈 배열 반환.
+ * @param topN 상위 N개 (기본 8)
+ */
+export function getDistrictNationalities(
+  provinceName: string,
+  districtName: string,
+  topN = 8,
+): DistrictNationality[] {
+  const list = districtNationalityMap[`${provinceName}|${districtName}`] || [];
+  return list.slice(0, topN);
 }
