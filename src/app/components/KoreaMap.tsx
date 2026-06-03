@@ -10,7 +10,6 @@ import type { OpportunityDatum } from "../data/opportunityData";
 interface KoreaMapProps {
   onRegionClick: (region: string) => void;
   onRegionHover: (region: string | null) => void;
-  onRegionDoubleClick: (region: string) => void;
   selectedRegion: string | null;
   opportunityData: Record<string, OpportunityDatum>;
   externalHoveredRegion?: string | null;
@@ -29,7 +28,7 @@ const regionsInfo = [
   { id: "jeju", name: "제주" }
 ];
 
-export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, selectedRegion, opportunityData, externalHoveredRegion, brushedRegions = [] }: KoreaMapProps) {
+export function KoreaMap({ onRegionClick, onRegionHover, selectedRegion, opportunityData, externalHoveredRegion, brushedRegions = [] }: KoreaMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
@@ -49,7 +48,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
     }
   }, []);
 
-  
   useEffect(() => {
     if (!mapContainerRef.current) return;
     const svgElement = mapContainerRef.current.querySelector("svg");
@@ -68,7 +66,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
 
   }, [selectedRegion, hoveredRegion, brushedRegions, svgContent]);
 
-  
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
@@ -112,8 +109,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
 
   const validIds = regionsInfo.map(r => r.id);
 
-  
-  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover" | "doubleclick") => {
+  const handleInteraction = (e: React.MouseEvent<HTMLDivElement>, type: "click" | "hover") => {
     const target = e.target as SVGElement;
     const regionElement = target.id ? target : (target.closest('g') || target.closest('path'));
     const regionId = regionElement?.id;
@@ -124,7 +120,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
         setHoveredRegion(regionId);
         onRegionHover(regionId);
       }
-      if (type === "doubleclick") onRegionDoubleClick(regionId);
     } else if (type === "hover") {
       setHoveredRegion(null);
       onRegionHover(null);
@@ -152,7 +147,7 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
       ) : (
         <div className="absolute top-6 left-6 bg-white/85 px-5 py-4 rounded-xl shadow-md border border-gray-200 pointer-events-none z-20 backdrop-blur-md">
           <p className="text-sm font-semibold text-gray-500">
-            클릭으로 입지기회도를 확인하세요
+            클릭하여 세부 지역 확인
           </p>
         </div>
       )}
@@ -167,7 +162,6 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
           setHoveredRegion(null);
           onRegionHover(null);
         }}
-        onDoubleClick={(e) => handleInteraction(e, "doubleclick")}
         dangerouslySetInnerHTML={{ __html: svgContent }}
       />
 

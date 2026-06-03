@@ -124,7 +124,7 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
       let strokeWidth = "0.5px";
       // 우선순위: hover > brushed > compare > selected
       if (isHovered) {
-        strokeColor = "#6E5FB3";
+        strokeColor = "#ab418f";
         strokeWidth = "2.5px";
       } else if (isBrushed) {
         strokeColor = "#f97316";

@@ -98,6 +98,29 @@ function formatCompactTick(value: number): string {
   return value.toLocaleString();
 }
 
+// ✅ 실제 그래프에서 축 스케일 간격을 예쁘고 일정하게 만들어주는 유틸리티 함수
+function getNiceTicks(maxVal: number, tickCount = 5): number[] {
+  if (maxVal <= 0) return [0, 1];
+  const rawStep = maxVal / tickCount;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  let step;
+  
+  if (norm <= 1.2) step = 1;
+  else if (norm <= 2.5) step = 2;
+  else if (norm <= 6) step = 5;
+  else step = 10;
+  
+  step *= mag;
+
+  const niceMax = Math.ceil(maxVal / step) * step;
+  const ticks = [];
+  for (let i = 0; i <= Math.round(niceMax / step); i++) {
+    ticks.push(Number((i * step).toFixed(5)));
+  }
+  return ticks;
+}
+
 type ExtendedScatterDataItem = ScatterDataItem & {
   spending: number;
   visitors: number;
@@ -218,8 +241,8 @@ function HighlightedScatterPoint({
   const compareColor =
     payload?.compareIndex != null ? REGION_COLORS[payload.compareIndex % REGION_COLORS.length] : null;
 
-  const baseRadius = size ? Math.sqrt(size) : 6;
-  const radius = isSelected || isHovered ? baseRadius + 3 : isBrushed ? baseRadius + 2 : baseRadius;
+
+  const radius = 6;
 
   // 우선순위: selected > hovered > brushed(주황, 지도와 동일) > default
   const strokeColor = isSelected
@@ -231,7 +254,7 @@ function HighlightedScatterPoint({
       : isBrushed
         ? "#f97316"
         : "#b3b3b33a";
-  const strokeWidth = compareColor ? 5 : isSelected || isHovered || isBrushed ? 3 : 1.5;
+  const strokeWidth = compareColor ? 4 : isSelected || isHovered || isBrushed ? 3 : 1.5;
 
   return (
     <g
@@ -262,6 +285,17 @@ function HighlightedScatterPoint({
           fill="none"
           stroke={GLOW_COLOR}
           strokeWidth={5}
+          opacity={0.3}
+        />
+      )}
+      {(compareColor) && (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={radius + 3}
+          fill="none"
+          stroke={compareColor}
+          strokeWidth={3}
           opacity={0.3}
         />
       )}
@@ -491,6 +525,7 @@ export function InfrastructureScatterPlot({
   const xMetricLabel = "1인당 소비액";
   const colorMetricLabel = "공급포화도";
 
+  // ✅ X축 설정: 실제 모드일 때 getNiceTicks를 적용하여 스케일을 일정하게 만듭니다.
   const xConf = useMemo(() => {
     if (axisMode === "percentile") {
       return {
@@ -502,12 +537,17 @@ export function InfrastructureScatterPlot({
         label: "1인당 소비액 순위(%) →",
       };
     }
+    
+    // getNiceTicks로 깔끔한 스케일 눈금 생성
+    const actualTicks = getNiceTicks(axisBounds.xMax, 5);
+    const actualDomainMax = actualTicks[actualTicks.length - 1];
+    
     return {
       dataKey: "perVisitorSpending",
       scale: "linear" as const,
-      domain: [0, Math.max(axisBounds.xMax * 1.05, 1)] as [number, number],
-      ticks: undefined as number[] | undefined,
-      tickFormatter: (value: number) => `${value.toFixed(value >= 10 ? 0 : 1)}`,
+      domain: [0, actualDomainMax] as [number, number],
+      ticks: actualTicks as number[] | undefined,
+      tickFormatter: (value: number) => `${Number(value.toFixed(1))}`,
       label: "1인당 소비액 (천원/명) →",
     };
   }, [axisMode, axisBounds]);

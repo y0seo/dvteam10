@@ -2,6 +2,7 @@ import accommodationCsvRaw from "../../data/accommodation_status.csv?raw";
 import spendingCsvRaw from "../../data/lodging_spending.csv?raw";
 import realEstateCsvRaw from "../../data/real_estate_price.csv?raw";
 import visitorsCsvRaw from "../../data/visitors_2023_2025.csv?raw";
+import { provinceCsvNameToId } from "./visitorData";
 
 export type ScoreMetrics = {
   visitor: number;
@@ -31,48 +32,31 @@ export type OpportunityDatum = {
   opportunityScore?: number; 
 };
 
-const PROVINCE_NAME_TO_ID: Record<string, string> = {
-  "서울특별시": "seoul", "부산광역시": "busan", "대구광역시": "daegu",
-  "인천광역시": "incheon", "광주광역시": "gwangju", "대전광역시": "daejeon",
-  "울산광역시": "ulsan", "세종특별자치시": "sejong", "경기도": "gyeonggi",
-  "강원특별자치도": "gangwon", "충청북도": "chungbuk", "충청남도": "chungnam",
-  "전북특별자치도": "jeonbuk", "전라남도": "jeonnam", "경상북도": "gyeongbuk",
-  "경상남도": "gyeongnam", "제주특별자치도": "jeju"
-};
-
 function stripBom(value: string) { return value.charCodeAt(0) === 0xfeff ? value.slice(1) : value; }
 
 function parseCsvLine(line: string) {
   const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
-    if (char === '"' && next === '"') { current += '"'; i += 1; }
-    else if (char === '"') { inQuotes = !inQuotes; }
-    else if (char === "," && !inQuotes) { result.push(current); current = ""; }
-    else { current += char; }
+  let current = ""; let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"' && line[i + 1] === '"') { current += '"'; i++; }
+    else if (line[i] === '"') { inQuotes = !inQuotes; }
+    else if (line[i] === "," && !inQuotes) { result.push(current); current = ""; }
+    else { current += line[i]; }
   }
-  result.push(current);
-  return result;
+  result.push(current); return result;
 }
 
 function parseCsv(rawText: string): Record<string, string>[] {
   const lines = stripBom(rawText).trim().split(/\r?\n/);
   const headers = parseCsvLine(lines[0]);
-  return lines.slice(1).map((line) => {
-    const cols = parseCsvLine(line);
-    return Object.fromEntries(headers.map((header, index) => [header, cols[index] ?? ""]));
-  });
+  return lines.slice(1).map(line => Object.fromEntries(headers.map((h, i) => [h, parseCsvLine(line)[i] ?? ""])));
 }
 
 const parseNumber = (value: string | undefined) => Number(value?.replace(/,/g, "").trim()) || 0;
 
 export function zToPercentileScore(z: number): number {
-  if (typeof z !== 'number' || isNaN(z)) return 50.0; 
-  const percentile = 1 / (1 + Math.exp(-1.702 * z));
-  return Math.round(percentile * 1000) / 10;
+  if (isNaN(z)) return 50.0; 
+  return Math.round((1 / (1 + Math.exp(-1.702 * z))) * 1000) / 10;
 }
 
 function toTScore(z: number, isNegativeIndicator: boolean = false) {
@@ -82,24 +66,18 @@ function toTScore(z: number, isNegativeIndicator: boolean = false) {
 function getZScoreStats(values: number[]) {
   if (values.length === 0) return { mean: 0, std: 1 };
   const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
-  const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-  const std = Math.sqrt(variance) || 1;
+  const std = Math.sqrt(values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length) || 1;
   return { mean, std };
 }
 
-// =========================================================================
-// 💡 데이터 취합 및 가공 (정규화 함수 제거)
-// =========================================================================
 const accRows = parseCsv(accommodationCsvRaw);
 const spendRows = parseCsv(spendingCsvRaw);
 const priceRows = parseCsv(realEstateCsvRaw);
 const visRows = parseCsv(visitorsCsvRaw);
 
-const distAcc: Record<string, number> = {};
-const provAcc: Record<string, number> = {};
+const distAcc: Record<string, number> = {}; const provAcc: Record<string, number> = {};
 accRows.forEach(row => {
-  const prov = row['광역지자체명'];
-  const dist = row['기초지자체'];
+  const prov = row['광역지자체명']; const dist = row['기초지자체'];
   if (!prov || !dist) return;
   let sum = 0;
   Object.entries(row).forEach(([k, v]) => { if (k !== '광역지자체명' && k !== '기초지자체') sum += parseNumber(v); });
@@ -107,22 +85,18 @@ accRows.forEach(row => {
   provAcc[prov] = (provAcc[prov] || 0) + sum;
 });
 
-const distSpend: Record<string, number> = {};
-const provSpend: Record<string, number> = {};
+const distSpend: Record<string, number> = {}; const provSpend: Record<string, number> = {};
 spendRows.forEach(row => {
-  const prov = row['광역시도'];
-  const dist = row['시군구'];
+  const prov = row['광역시도']; const dist = row['시군구'];
   if (!prov || prov === '전국') return;
   const val = parseNumber(row['숙박업_소비지출액(천원)']);
   if (!dist) provSpend[prov] = val;
   else distSpend[`${prov}-${dist}`] = (distSpend[`${prov}-${dist}`] || 0) + val;
 });
 
-const distPriceSum: Record<string, { s: number, c: number }> = {};
-const provPriceSum: Record<string, { s: number, c: number }> = {};
+const distPriceSum: Record<string, { s: number, c: number }> = {}; const provPriceSum: Record<string, { s: number, c: number }> = {};
 priceRows.forEach(row => {
-  const prov = row['광역지자체명'];
-  const dist = row['기초지자체'];
+  const prov = row['광역지자체명']; const dist = row['기초지자체'];
   if (!prov || !dist) return;
   const val = parseNumber(row['1m2당_평균거래금액(만원)']);
   if (!distPriceSum[`${prov}-${dist}`]) distPriceSum[`${prov}-${dist}`] = { s: 0, c: 0 };
@@ -130,28 +104,22 @@ priceRows.forEach(row => {
   if (!provPriceSum[prov]) provPriceSum[prov] = { s: 0, c: 0 };
   provPriceSum[prov].s += val; provPriceSum[prov].c += 1;
 });
+const distPrice: Record<string, number> = {}; Object.keys(distPriceSum).forEach(k => distPrice[k] = distPriceSum[k].s / distPriceSum[k].c);
+const provPrice: Record<string, number> = {}; Object.keys(provPriceSum).forEach(k => provPrice[k] = provPriceSum[k].s / provPriceSum[k].c);
 
-const distPrice: Record<string, number> = {};
-Object.keys(distPriceSum).forEach(k => distPrice[k] = distPriceSum[k].s / distPriceSum[k].c);
-const provPrice: Record<string, number> = {};
-Object.keys(provPriceSum).forEach(k => provPrice[k] = provPriceSum[k].s / provPriceSum[k].c);
-
-const distVis: Record<string, { y24: number, y25: number }> = {};
-const provVis: Record<string, { y24: number, y25: number }> = {};
+const distVis: Record<string, { y24: number, y25: number }> = {}; const provVis: Record<string, { y24: number, y25: number }> = {};
 const processedProvMonths = new Set<string>();
 
 visRows.forEach(row => {
-  const prov = row['광역지자체명'];
-  const dist = row['기초지자체명'];
-  const date = row['년월'];
+  const prov = row['광역지자체명']; const dist = row['기초지자체명']; const date = row['년월'];
   if (!prov || !dist || !date) return;
   const year = date.split('-')[0];
-  const dVis = parseNumber(row['기초지자체 방문자 수']);
-  const pVis = parseNumber(row['광역지자체 방문자 수']);
+  const dVis = parseNumber(row['기초지자체 방문자 수']); const pVis = parseNumber(row['광역지자체 방문자 수']);
   const dKey = `${prov}-${dist}`;
   if (!distVis[dKey]) distVis[dKey] = { y24: 0, y25: 0 };
   if (year === '2024') distVis[dKey].y24 += dVis;
   if (year === '2025') distVis[dKey].y25 += dVis;
+  
   const pKey = `${prov}-${date}`;
   if (!processedProvMonths.has(pKey)) {
     processedProvMonths.add(pKey);
@@ -165,17 +133,15 @@ const allDistKeys = new Set([...Object.keys(distAcc), ...Object.keys(distSpend),
 const detailRawData: any[] = [];
 allDistKeys.forEach(dKey => {
   const sepIdx = dKey.indexOf('-');
-  const provName = dKey.slice(0, sepIdx);
-  const distName = dKey.slice(sepIdx + 1);
-  const provId = PROVINCE_NAME_TO_ID[provName];
+  const provName = dKey.slice(0, sepIdx); const distName = dKey.slice(sepIdx + 1);
+  const provId = provinceCsvNameToId[provName];
   if (!provId) return;
   const vData = distVis[dKey] || { y24: 0, y25: 0 };
   detailRawData.push({ provinceId: provId, provinceName: provName, districtName: distName, raw: { visitor: vData.y25, spending: distSpend[dKey] || 0, accommodation: distAcc[dKey] || 0, price: distPrice[dKey] || provPrice[provName] || 0, growth: vData.y24 > 0 ? (vData.y25 / vData.y24) - 1 : 0 } });
 });
 
 const mainRawData: any[] = [];
-Object.keys(PROVINCE_NAME_TO_ID).forEach(provName => {
-  const provId = PROVINCE_NAME_TO_ID[provName];
+Object.entries(provinceCsvNameToId).forEach(([provName, provId]) => {
   const vData = provVis[provName] || { y24: 0, y25: 0 };
   mainRawData.push({ provinceId: provId, provinceName: provName, raw: { visitor: vData.y25, spending: provSpend[provName] || 0, accommodation: provAcc[provName] || 0, price: provPrice[provName] || 0, growth: vData.y24 > 0 ? (vData.y25 / vData.y24) - 1 : 0 } });
 });
