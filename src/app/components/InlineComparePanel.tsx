@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import {
   CartesianGrid,
@@ -53,28 +53,6 @@ const COUNTRY_COLORS: Record<string, string> = {
 const FALLBACK_COUNTRY_COLOR = "#94A3B8";
 const countryColor = (name: string) => COUNTRY_COLORS[name] || FALLBACK_COUNTRY_COLOR;
 
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const num = parseInt(full, 16);
-  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const [r, g, b] = hexToRgb(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-// 흰색 배경 위에 alpha로 합성한 셀 색의 휘도로 글자색(흰/검) 결정
-function cellTextColor(hex: string, alpha: number): string {
-  const [r, g, b] = hexToRgb(hex);
-  const cr = r * alpha + 255 * (1 - alpha);
-  const cg = g * alpha + 255 * (1 - alpha);
-  const cb = b * alpha + 255 * (1 - alpha);
-  const luminance = (0.299 * cr + 0.587 * cg + 0.114 * cb) / 255;
-  return luminance > 0.62 ? "#1f2937" : "#ffffff";
-}
-
 function compactNumber(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억`;
@@ -106,6 +84,8 @@ type InlineComparePanelProps = {
 };
 
 export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps) {
+  const [isNationalitySplit, setIsNationalitySplit] = useState(false);
+  const [selectedNationality, setSelectedNationality] = useState<string | null>(null);
   const comparisonRows = useMemo(() => buildComparisonRows(regions), [regions]);
   const peerScope = useMemo(() => getPeerScope(regions), [regions]);
 
@@ -160,9 +140,7 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
     comparisonRows.some((_, index) => typeof point[`region${index}`] === "number"),
   );
 
-  // ── 국적 비교: 전체 합산 상위 4개국(행) × 3지역(열) 히트맵 ──────────────────
-  // 국적별로 어느 지역에 많이 왔는지 가로로 바로 비교 가능하도록 국가를 행으로 고정
-  const { natCountries, natRegions, natShares, nationalityMax } = useMemo(() => {
+  const { natCountries, natRegions, nationalityBars, maxNationalityUnits } = useMemo(() => {
     const perRegion = comparisonRows.map((row) => {
       const csvProvince =
         provinceIdToCsvName[row.region.provinceId] || row.region.provinceName;
@@ -171,34 +149,115 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
         if (item.country === "기타") continue;
         map.set(item.country, item.percentage);
       }
-      return { region: row.region, map };
+      const visitorCount = row.monthlyVisitors
+        .filter((item) => item.month.startsWith("2025-"))
+        .reduce((sum, item) => sum + item.visitors, 0);
+      return {
+        region: row.region,
+        visitors: visitorCount,
+        map,
+      };
     });
 
-    // 세 지역 비율 합산 기준 상위 4개국 (지역 공통 국가 집합)
     const totals = new Map<string, number>();
-    for (const { map } of perRegion) {
+    for (const { map, visitors } of perRegion) {
       for (const [country, pct] of map) {
-        totals.set(country, (totals.get(country) || 0) + pct);
+        totals.set(country, (totals.get(country) || 0) + visitors * (pct / 100));
       }
     }
     const natCountries = [...totals.entries()]
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
+      .slice(0, 3)
       .map(([country]) => country);
 
-    // natShares[국가][지역] = 비율(%) (해당 지역 데이터 없으면 0)
-    const natShares = natCountries.map((country) =>
-      perRegion.map(({ map }) => map.get(country) ?? 0),
-    );
-    const nationalityMax = Math.max(...natShares.flat(), 1);
+    const nationalityBars = perRegion.map(({ region, visitors, map }) => {
+      const countries = natCountries.map((country) => {
+        const percentage = map.get(country) ?? 0;
+        const count = visitors * (percentage / 100);
+        return {
+          country,
+          percentage,
+          count,
+          units: Math.round(count / 1000),
+        };
+      });
+
+      return {
+        region,
+        totalUnits: countries.reduce((sum, item) => sum + item.units, 0),
+        countries,
+      };
+    });
+
+    const maxNationalityUnits = Math.max(...nationalityBars.map((bar) => bar.totalUnits), 1);
 
     return {
       natCountries,
       natRegions: perRegion.map((p) => p.region),
-      natShares,
-      nationalityMax,
+      nationalityBars,
+      maxNationalityUnits,
     };
   }, [comparisonRows]);
+
+  const visibleNatCountries = selectedNationality
+    ? natCountries.filter((country) => country === selectedNationality)
+    : natCountries;
+
+  const maxVisibleNationalityUnits = Math.max(
+    ...nationalityBars.map((bar) =>
+      bar.countries
+        .filter((item) => visibleNatCountries.includes(item.country))
+        .reduce((sum, item) => sum + item.units, 0),
+    ),
+    1,
+  );
+
+  const unitSizePx =
+    maxVisibleNationalityUnits > 900 ? 3 : maxVisibleNationalityUnits > 450 ? 4 : 5;
+
+  const unitGridStyle = {
+    gridTemplateColumns: `repeat(25, ${unitSizePx}px)`,
+    gridAutoRows: `${unitSizePx}px`,
+  };
+
+  const renderNationalityUnitRows = (
+    segments: { units: number; color: string; keyPrefix: string }[],
+  ) => {
+    const units = segments.flatMap((segment) =>
+      Array.from({ length: segment.units }).map((_, index) => ({
+        key: `${segment.keyPrefix}-${index}`,
+        color: segment.color,
+      })),
+    );
+    const rows = Array.from({ length: Math.ceil(units.length / 25) }, (_, rowIndex) =>
+      units.slice(rowIndex * 25, rowIndex * 25 + 25),
+    );
+
+    return (
+      <div className="flex flex-col-reverse items-center gap-[1px]">
+        {rows.map((row, rowIndex) => (
+          <div
+            key={rowIndex}
+            className="grid justify-center gap-[1px]"
+            style={unitGridStyle}
+          >
+            {row.map((unit) => (
+              <span
+                key={unit.key}
+                className="rounded-[1px]"
+                style={{
+                  width: unitSizePx,
+                  height: unitSizePx,
+                  background: unit.color,
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.28)",
+                }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="h-full w-full bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
@@ -227,7 +286,7 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
       </div>
 
       {/* 상단: 레이더 (전국 대비 / 권역 내) */}
-      <div className="flex-[1.05] min-h-0 grid grid-cols-2 gap-2 px-4 pt-3 pb-2 border-b border-gray-100">
+      <div className="flex-[0.95] min-h-0 grid grid-cols-2 gap-2 px-4 pt-3 pb-2 border-b border-gray-100">
         <div className="flex flex-col min-h-0">
           <p className="text-[11px] font-bold text-gray-500 mb-0.5 px-1">전국 대비</p>
           <div className="flex-1 min-h-0">
@@ -297,7 +356,7 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
       </div>
 
       {/* 중단: 방문자 수 라인차트 */}
-      <div className="flex-[0.85] min-h-0 flex flex-col px-4 pt-2.5 pb-1.5 border-b border-gray-100">
+      <div className="flex-[0.78] min-h-0 flex flex-col px-4 pt-2.5 pb-1.5 border-b border-gray-100">
         <div className="flex items-baseline justify-between mb-1">
           <p className="text-[12px] font-bold text-gray-700">시간대별 방문자수</p>
           <span className="text-[10px] font-semibold text-gray-400">
@@ -354,69 +413,151 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
         </div>
       </div>
 
-      {/* 하단: 외국인 국적 구성 — 상위 4개국(행) × 3지역(열) 히트맵 */}
-      <div className="flex-[1.4] min-h-0 flex flex-col px-4 pt-2.5 pb-3">
-        <div className="flex items-baseline justify-between mb-2">
-          <p className="text-[13px] font-bold text-gray-700">외국인 국적 구성 비교</p>
-          <span className="text-[10px] font-semibold text-gray-400">시군구 · 상위 4개국 × 지역별 방문 비중</span>
+      {/* 하단: 외국인 국적 구성 — 지역별 top3 국적 유닛 스택바 */}
+      <div className="flex-[1.85] min-h-0 flex flex-col px-4 pt-2.5 pb-4">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div>
+            <p className="text-[13px] font-bold text-gray-700">외국인 국적 구성 비교</p>
+            <span className="text-[10px] font-semibold text-gray-400">
+              x축: 지역 · y축: 2025년 관광객 수 · 유닛 1개 = 1천명
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsNationalitySplit((value) => !value)}
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-black transition-colors ${
+              isNationalitySplit
+                ? "bg-gray-800 text-white"
+                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            }`}
+          >
+            {isNationalitySplit ? "스택 보기" : "국적별 분리"}
+          </button>
         </div>
         {natCountries.length > 0 ? (
           <div className="flex-1 min-h-0 flex flex-col">
-            {/* 헤더 행: 지역명 */}
-            <div
-              className="grid gap-1.5 mb-1.5"
-              style={{ gridTemplateColumns: "62px repeat(3, minmax(0, 1fr))" }}
-            >
-              <div />
-              {natRegions.map((region, ri) => (
-                <div
-                  key={`${region.provinceId}-${region.id}`}
-                  className="flex items-center justify-center gap-1 px-1"
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              {natCountries.map((country) => (
+                <button
+                  key={country}
+                  type="button"
+                  onClick={() =>
+                    setSelectedNationality((current) => (current === country ? null : country))
+                  }
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-black transition-colors ${
+                    selectedNationality === country
+                      ? "bg-gray-800 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
                 >
-                  <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: REGION_COLORS[ri] }} />
-                  <span className="text-[11px] font-black truncate" style={{ color: REGION_COLORS[ri] }}>
-                    {region.name}
-                  </span>
-                </div>
+                  <span className="w-2 h-2 rounded-sm" style={{ background: countryColor(country) }} />
+                  {country}
+                </button>
               ))}
+              {selectedNationality && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedNationality(null)}
+                  className="rounded-md px-2 py-1 text-[10px] font-black text-gray-400 hover:bg-gray-100"
+                >
+                  전체
+                </button>
+              )}
             </div>
-            {/* 국가 행들: 각 셀 = 국가색 + 비율 강도 */}
-            <div
-              className="flex-1 min-h-0 grid gap-1.5"
-              style={{
-                gridTemplateColumns: "62px repeat(3, minmax(0, 1fr))",
-                gridTemplateRows: `repeat(${natCountries.length}, minmax(0, 1fr))`,
-              }}
-            >
-              {natCountries.map((country, ci) => {
-                const base = countryColor(country);
+
+            <div className="flex-1 min-h-0 grid grid-cols-[36px_repeat(3,minmax(0,1fr))] gap-2 pt-2 pb-1">
+              <div className="relative h-full border-r border-gray-200">
+                {[1, 0.75, 0.5, 0.25, 0].map((ratio) => (
+                  <span
+                    key={ratio}
+                    className="absolute right-1 text-[9px] font-bold text-gray-300 tabular-nums"
+                    style={{
+                      ...(ratio === 1
+                        ? { top: 0 }
+                        : ratio === 0
+                          ? { bottom: 0 }
+                          : { bottom: `${ratio * 100}%`, transform: "translateY(50%)" }),
+                    }}
+                  >
+                    {Math.round((maxVisibleNationalityUnits * ratio) || maxNationalityUnits * ratio)}
+                  </span>
+                ))}
+              </div>
+
+              {nationalityBars.map((bar, regionIndex) => {
+                const visibleItems = bar.countries.filter((item) =>
+                  visibleNatCountries.includes(item.country),
+                );
+                const visibleTotalUnits = visibleItems.reduce((sum, item) => sum + item.units, 0);
+                const stackedHeight = `${Math.max(
+                  3,
+                  (visibleTotalUnits / maxVisibleNationalityUnits) * 100,
+                )}%`;
+
                 return (
-                  <Fragment key={country}>
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: base }} />
-                      <span className="text-[12px] font-black truncate" style={{ color: base }}>
-                        {country}
-                      </span>
-                    </div>
-                    {natShares[ci].map((pct, ri) => {
-                      const hasData = pct > 0;
-                      const t = pct / nationalityMax;
-                      const alpha = hasData ? 0.16 + 0.84 * t : 0;
-                      return (
+                  <div
+                    key={`${bar.region.provinceId}-${bar.region.id}`}
+                    className="min-w-0 flex flex-col items-center justify-end gap-1"
+                  >
+                    <div className="flex-1 min-h-0 w-full flex items-end justify-center gap-1.5 px-1">
+                      {isNationalitySplit ? (
+                        visibleItems.map((item) => {
+                          const splitHeight = `${Math.max(
+                            3,
+                            (item.units / maxVisibleNationalityUnits) * 100,
+                          )}%`;
+                          return (
+                            <div
+                              key={item.country}
+                              className="h-full min-w-0 flex flex-col items-center justify-end gap-0.5"
+                            >
+                              <div
+                                className="w-32 max-w-full overflow-hidden flex items-end justify-center p-[2px]"
+                                style={{ height: splitHeight }}
+                                title={`${bar.region.name} ${item.country}: ${compactNumber(item.count)}명`}
+                              >
+                                {renderNationalityUnitRows([
+                                  {
+                                    units: item.units,
+                                    color: countryColor(item.country),
+                                    keyPrefix: `${bar.region.id}-${item.country}`,
+                                  },
+                                ])}
+                              </div>
+                              <span className="text-[8px] font-black text-gray-400 truncate max-w-[36px]">
+                                {item.country}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
                         <div
-                          key={`${country}-${ri}`}
-                          className="rounded-lg flex items-center justify-center text-[13px] font-black tabular-nums"
-                          style={{
-                            background: hasData ? hexToRgba(base, alpha) : "#f8fafc",
-                            color: hasData ? cellTextColor(base, alpha) : "#cbd5e1",
-                            border: hasData ? "none" : "1px dashed #e5e7eb",
-                          }}
+                          className="w-36 max-w-full overflow-hidden flex items-end justify-center p-[2px]"
+                          style={{ height: stackedHeight }}
+                          title={`${bar.region.name}: ${visibleTotalUnits.toLocaleString()}천명`}
                         >
-                          {hasData ? `${pct.toFixed(1)}%` : "—"}
+                          {renderNationalityUnitRows(
+                            visibleItems.map((item) => ({
+                              units: item.units,
+                              color: countryColor(item.country),
+                              keyPrefix: `${bar.region.id}-${item.country}`,
+                            })),
+                          )}
                         </div>
-                      );
-                    })}
-                  </Fragment>
+                      )}
+                    </div>
+                    <div className="w-full text-center">
+                      <p
+                        className="text-[11px] font-black truncate"
+                        style={{ color: REGION_COLORS[regionIndex] }}
+                      >
+                        {natRegions[regionIndex]?.name || bar.region.name}
+                      </p>
+                      <p className="text-[9px] font-bold text-gray-400 tabular-nums">
+                        {visibleTotalUnits.toLocaleString()}천명
+                      </p>
+                    </div>
+                  </div>
                 );
               })}
             </div>
