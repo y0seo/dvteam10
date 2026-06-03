@@ -1,8 +1,9 @@
 import { Fragment, useMemo } from "react";
 import { X } from "lucide-react";
 import {
-  Bar,
-  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
   PolarAngleAxis,
   PolarGrid,
   PolarRadiusAxis,
@@ -21,30 +22,11 @@ import {
   getPeerScopeLabel,
   radarMetricKeys,
   type CompareRegion,
-  type MetricKey,
 } from "../data/comparisonData";
 import { getDistrictNationalities } from "../data/nationality";
 import { provinceIdToCsvName } from "../data/visitorData";
 
 const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
-
-// weightMap의 id(드래그 우선순위) → 비교 지표 키 매핑
-const WEIGHT_ID_TO_METRIC: Record<string, MetricKey> = {
-  growth: "visitorGrowth",
-  visitor: "foreignVisitors",
-  spending: "accommodationSpending",
-  price: "landPrice",
-  competition: "accommodationBusinesses",
-};
-
-// 종합 스택바에서 각 지표 세그먼트 색상 (지역색과 구분되는 별도 팔레트)
-const METRIC_COLORS: Record<MetricKey, string> = {
-  visitorGrowth: "#f59e0b", // 성장세
-  foreignVisitors: "#3b82f6", // 방문자
-  accommodationSpending: "#10b981", // 소비액
-  landPrice: "#8b5cf6", // 가격경쟁력
-  accommodationBusinesses: "#f43f5e", // 블루오션도
-};
 
 // 국적별 색상 (국가 식별용 카테고리 팔레트, 미등록 국가는 회색 폴백)
 const COUNTRY_COLORS: Record<string, string> = {
@@ -100,26 +82,6 @@ function compactNumber(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
-function formatMetricValue(metric: MetricKey, value: number | null): string {
-  if (value == null) return "—";
-  switch (metric) {
-    case "visitorGrowth":
-      return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
-    case "landPrice":
-      return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}만원`;
-    case "accommodationBusinesses":
-      return `${Math.round(value).toLocaleString()}개`;
-    case "foreignVisitors":
-      return `${compactNumber(value)}명`;
-    case "accommodationSpending": {
-      const eok = value / 100_000; // 천원 → 억원 (1억원 = 100,000천원)
-      return Math.abs(eok) >= 1
-        ? `${eok.toFixed(1)}억원`
-        : `${Math.round(value).toLocaleString()}천원`;
-    }
-  }
-}
-
 function renderAngleAxisTick(props: {
   x: number;
   y: number;
@@ -143,35 +105,9 @@ type InlineComparePanelProps = {
   onClose: () => void;
 };
 
-type MetricDetail = {
-  value: number | null;
-  score: number; // 전국 percentile (역산 반영, 0-100, 높을수록 유리)
-  weight: number;
-  contrib: number; // weight × score
-  label: string;
-  shortLabel: string;
-};
-
-export function InlineComparePanel({ regions, weightMap, onClose }: InlineComparePanelProps) {
+export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps) {
   const comparisonRows = useMemo(() => buildComparisonRows(regions), [regions]);
   const peerScope = useMemo(() => getPeerScope(regions), [regions]);
-
-  // 가중치 우선순위 순으로 정렬된 5개 지표 키
-  const orderedMetricKeys = useMemo(
-    () =>
-      Object.entries(weightMap)
-        .sort((a, b) => b[1] - a[1])
-        .map(([id]) => WEIGHT_ID_TO_METRIC[id])
-        .filter((key): key is MetricKey => Boolean(key)),
-    [weightMap],
-  );
-
-  const metricWeight = useMemo(() => {
-    const idByMetric = Object.fromEntries(
-      Object.entries(WEIGHT_ID_TO_METRIC).map(([id, key]) => [key, id]),
-    ) as Record<MetricKey, string>;
-    return (key: MetricKey) => weightMap[idByMetric[key]] || 0;
-  }, [weightMap]);
 
   const nationwideRadarData = useMemo(
     () =>
@@ -200,45 +136,29 @@ export function InlineComparePanel({ regions, weightMap, onClose }: InlineCompar
     }));
   }, [comparisonRows, peerScope]);
 
-  // ── 종합 스택바: 정규화 점수 × 가중치를 합산 (지표별 기여도) ──────────────
-  const { stackedData, detailByName, compositeByName, maxTotal } = useMemo(() => {
-    const detailByName: Record<string, Record<MetricKey, MetricDetail>> = {};
-    const compositeByName: Record<string, number> = {};
+  const visitorTrendData = useMemo(() => {
+    const months = [
+      ...new Set(comparisonRows.flatMap((row) => row.monthlyVisitors.map((item) => item.month))),
+    ].sort();
 
-    const rows = comparisonRows.map((row) => {
-      const detail = {} as Record<MetricKey, MetricDetail>;
-      let total = 0;
-      const bar: Record<string, number | string> = { name: row.region.name };
-      for (const key of orderedMetricKeys) {
-        const value = row.metrics[key].value;
-        const score = getNationwideRadarScore(key, value);
-        const weight = metricWeight(key);
-        const contrib = Number((weight * score).toFixed(2));
-        detail[key] = {
-          value,
-          score,
-          weight,
-          contrib,
-          label: row.metrics[key].label,
-          shortLabel: row.metrics[key].shortLabel,
-        };
-        bar[key] = contrib;
-        total += contrib;
-      }
-      detailByName[row.region.name] = detail;
-      compositeByName[row.region.name] = total;
-      return { bar, total };
+    return months.map((month) => {
+      const point: Record<string, string | number | null> = {
+        month,
+        monthLabel: month.replace("-", "."),
+      };
+
+      comparisonRows.forEach((row, index) => {
+        point[`region${index}`] =
+          row.monthlyVisitors.find((item) => item.month === month)?.visitors ?? null;
+      });
+
+      return point;
     });
+  }, [comparisonRows]);
 
-    rows.sort((a, b) => b.total - a.total); // 종합 점수 내림차순
-    const maxTotal = Math.max(...rows.map((r) => r.total), 1);
-    return {
-      stackedData: rows.map((r) => r.bar),
-      detailByName,
-      compositeByName,
-      maxTotal,
-    };
-  }, [comparisonRows, orderedMetricKeys, metricWeight]);
+  const hasVisitorTrendData = visitorTrendData.some((point) =>
+    comparisonRows.some((_, index) => typeof point[`region${index}`] === "number"),
+  );
 
   // ── 국적 비교: 전체 합산 상위 4개국(행) × 3지역(열) 히트맵 ──────────────────
   // 국적별로 어느 지역에 많이 왔는지 가로로 바로 비교 가능하도록 국가를 행으로 고정
@@ -279,8 +199,6 @@ export function InlineComparePanel({ regions, weightMap, onClose }: InlineCompar
       nationalityMax,
     };
   }, [comparisonRows]);
-
-  const niceMax = Math.ceil(maxTotal / 5) * 5;
 
   return (
     <div className="h-full w-full bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
@@ -378,87 +296,61 @@ export function InlineComparePanel({ regions, weightMap, onClose }: InlineCompar
         </div>
       </div>
 
-      {/* 중단: 우선순위 가중 종합 스택바 */}
+      {/* 중단: 방문자 수 라인차트 */}
       <div className="flex-[0.85] min-h-0 flex flex-col px-4 pt-2.5 pb-1.5 border-b border-gray-100">
         <div className="flex items-baseline justify-between mb-1">
-          <p className="text-[12px] font-bold text-gray-700">우선순위 가중 종합 점수</p>
-          <span className="text-[10px] font-semibold text-gray-400">정규화 점수 × 내 가중치 합산</span>
-        </div>
-        {/* 지표 색상 범례 (가중치 순) */}
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mb-1">
-          {orderedMetricKeys.map((key) => (
-            <span key={key} className="flex items-center gap-1 text-[9.5px] font-semibold text-gray-500">
-              <span className="w-2 h-2 rounded-sm" style={{ background: METRIC_COLORS[key] }} />
-              {detailByName[stackedData[0]?.name as string]?.[key]?.shortLabel || key}
-              <span className="text-gray-400">{Math.round(metricWeight(key) * 100)}%</span>
-            </span>
-          ))}
+          <p className="text-[12px] font-bold text-gray-700">시간대별 방문자수</p>
+          <span className="text-[10px] font-semibold text-gray-400">
+            현재 연결 데이터: 2023-2025 월별 방문자 수
+          </span>
         </div>
         <div className="flex-1 min-h-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={stackedData}
-              layout="vertical"
-              margin={{ top: 2, right: 12, bottom: 0, left: 4 }}
-              barCategoryGap="22%"
-            >
-              <XAxis type="number" domain={[0, niceMax]} hide />
-              <YAxis
-                type="category"
-                dataKey="name"
-                width={56}
-                axisLine={false}
-                tickLine={false}
-                tick={(props: { x: number; y: number; payload: { value: string } }) => {
-                  const { x, y, payload } = props;
-                  const total = compositeByName[payload.value] ?? 0;
-                  return (
-                    <g transform={`translate(${x},${y})`}>
-                      <text x={-4} y={-2} textAnchor="end" fontSize={11} fontWeight={800} fill="#374151">
-                        {payload.value}
-                      </text>
-                      <text x={-4} y={11} textAnchor="end" fontSize={9.5} fontWeight={700} fill="#8b5cf6">
-                        {total.toFixed(0)}점
-                      </text>
-                    </g>
-                  );
-                }}
-              />
-              <Tooltip
-                cursor={{ fill: "rgba(148,163,184,0.12)" }}
-                content={(props: { active?: boolean; label?: string | number }) => {
-                  const { active, label } = props;
-                  if (!active || label == null) return null;
-                  const detail = detailByName[label as string];
-                  if (!detail) return null;
-                  return (
-                    <div className="rounded-lg bg-white shadow-lg border border-gray-100 px-3 py-2 text-[11px]">
-                      <p className="font-black text-gray-800 mb-1">
-                        {label} · 종합 {(compositeByName[label as string] ?? 0).toFixed(0)}점
-                      </p>
-                      <div className="space-y-0.5">
-                        {orderedMetricKeys.map((key) => (
-                          <div key={key} className="flex items-center justify-between gap-3">
-                            <span className="flex items-center gap-1 text-gray-600">
-                              <span className="w-2 h-2 rounded-sm" style={{ background: METRIC_COLORS[key] }} />
-                              {detail[key].shortLabel}
-                            </span>
-                            <span className="font-bold tabular-nums text-gray-800">
-                              {formatMetricValue(key, detail[key].value)}
-                              <span className="ml-1 text-gray-400 font-semibold">{detail[key].score}점</span>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                }}
-              />
-              {orderedMetricKeys.map((key) => (
-                <Bar key={key} dataKey={key} stackId="score" fill={METRIC_COLORS[key]} isAnimationActive={false} />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+          {hasVisitorTrendData ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={visitorTrendData} margin={{ top: 6, right: 14, bottom: 0, left: -10 }}>
+                <CartesianGrid stroke="#eef2f7" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="monthLabel"
+                  tick={{ fontSize: 9, fill: "#94a3b8", fontWeight: 700 }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={5}
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: "#94a3b8", fontWeight: 700 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(value: number) => compactNumber(value)}
+                />
+                <Tooltip
+                  contentStyle={{ borderRadius: "10px", border: "none", fontSize: "11px" }}
+                  labelFormatter={(label) => `${label}`}
+                  formatter={(value: number | string, name: string) => [
+                    typeof value === "number" ? `${compactNumber(value)}명` : value,
+                    name,
+                  ]}
+                />
+                {comparisonRows.map((row, index) => (
+                  <Line
+                    key={`${row.region.provinceId}-${row.region.id}`}
+                    type="monotone"
+                    dataKey={`region${index}`}
+                    name={row.region.name}
+                    stroke={REGION_COLORS[index]}
+                    strokeWidth={2.4}
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 2, fill: "#ffffff" }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full rounded-xl border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-[11px] font-bold text-gray-400">
+              방문자 수 흐름 데이터가 없습니다.
+            </div>
+          )}
         </div>
       </div>
 
