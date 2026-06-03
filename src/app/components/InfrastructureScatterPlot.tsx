@@ -34,20 +34,18 @@ interface InfrastructureScatterPlotProps {
   opportunityDataByPoint?: Record<string, any>;
   onDataPointClick?: (item: ScatterDataItem) => void;
   onDataPointHover?: (item: ScatterDataItem | null) => void;
-  // 박스 드래그 브러싱: 선택된 점 id 목록을 상위로 전달 (지도 cross-highlight)
   onBrushSelect?: (ids: string[]) => void;
-  // 브러싱으로 선택된 점 id (상위에서 되돌려받아 산점도에서도 강조/dim)
   brushedIds?: string[];
 }
 
-// stroke: dusty amber 톤 (ATOM 스타일 — 비비드 자제)
-const HOVERED_POINT_COLOR = "#ab418f"; // amber-400 — 부드러운 황금
-const SELECTED_POINT_COLOR = "#d97706"; // amber-600 — 진한 황금 (차분)
-const GLOW_COLOR = "#fef3c7"; // amber-100 — 매우 옅은 후광
-// 장바구니 선택 stroke: 산점도 공급포화도 팔레트와 겹치지 않는 고대비 색상
+
+const HOVERED_POINT_COLOR = "#ab418f"; 
+const SELECTED_POINT_COLOR = "#d97706"; 
+const GLOW_COLOR = "#fef3c7"; 
+
 const REGION_COLORS = ["#0f766e", "#facc15", "#111827"];
 
-// 버블 색상 = 공급포화도 — 낮을수록 블루오션(파랑), 높을수록 레드오션(빨강)
+
 const OCEAN_PALETTE = [
   "#1d4ed8", // 0 블루오션 (경쟁 매우 적음)
   "#3b82f6", // 1
@@ -64,8 +62,7 @@ const OCEAN_PALETTE = [
 // 자본금 슬라이더 필터: 100평(약 330㎡) 기준 토지 매입가 환산용 상수
 const BASE_AREA_M2 = 330; // 100평 ≈ 330㎡
 
-// 분포가 극단적으로 우측 꼬리(수도권 쏠림)라 실제값만 보면 다수가 한 구석에 뭉친다.
-// 백분위 모드에서는 위치와 색을 "전국 기준 백분위"로 변환해 스케일을 고정한다.
+
 function percentilesOf(values: number[]): (v: number) => number {
   const sorted = [...values].sort((a, b) => a - b);
   const n = sorted.length;
@@ -90,7 +87,6 @@ function getOceanColorByPct(pct: number): string {
   return OCEAN_PALETTE[Math.max(0, idx)];
 }
 
-// 축 눈금 압축 표기 (12000 → 1.2만)
 function formatCompactTick(value: number): string {
   if (value >= 100000000) return `${(value / 100000000).toFixed(1)}억`;
   if (value >= 10000) return `${Math.round(value / 10000).toLocaleString()}만`;
@@ -98,7 +94,7 @@ function formatCompactTick(value: number): string {
   return value.toLocaleString();
 }
 
-// ✅ 실제 그래프에서 축 스케일 간격을 예쁘고 일정하게 만들어주는 유틸리티 함수
+
 function getNiceTicks(maxVal: number, tickCount = 5): number[] {
   if (maxVal <= 0) return [0, 1];
   const rawStep = maxVal / tickCount;
@@ -133,7 +129,7 @@ type RankedScatterDataItem = ExtendedScatterDataItem & {
   xPct: number; // 1인당 소비액 백분위
   yPct: number; // 관광객 백분위
   pricePct: number; // 지가 백분위 (보조)
-  safetyPct: number; // (구) 미사용
+  safetyPct: number; 
   saturation: number; // 공급포화도(숙박업소 수 / 방문자 수)
   colorPct: number; // 공급포화도 백분위 (블루↔레드오션)
   landCostEok: number; // 100평 기준 토지비 환산(억) — 자본금 슬라이더 필터
@@ -351,7 +347,7 @@ export function InfrastructureScatterPlot({
 
   useEffect(() => {
     setClickedPointId(null);
-    setCapitalEok(null); // 화면(전국↔시도) 전환 시 자본금 필터 초기화
+    setCapitalEok(null); 
   }, [selectedRegion]);
   
   const clickedPoint = useMemo(
@@ -525,7 +521,7 @@ export function InfrastructureScatterPlot({
   const xMetricLabel = "1인당 소비액";
   const colorMetricLabel = "공급포화도";
 
-  // ✅ X축 설정: 실제 모드일 때 getNiceTicks를 적용하여 스케일을 일정하게 만듭니다.
+  
   const xConf = useMemo(() => {
     if (axisMode === "percentile") {
       return {
@@ -538,7 +534,7 @@ export function InfrastructureScatterPlot({
       };
     }
     
-    // getNiceTicks로 깔끔한 스케일 눈금 생성
+    
     const actualTicks = getNiceTicks(axisBounds.xMax, 5);
     const actualDomainMax = actualTicks[actualTicks.length - 1];
     
@@ -592,7 +588,7 @@ export function InfrastructureScatterPlot({
     return activePiePoint.name;
   }, [activePiePoint, regionsInfo]);
 
-  // ✅ 툴팁용 메타 데이터 실시간 연산 로직
+  
   const activePointMeta = useMemo(() => {
     if (!activePiePoint) return null;
     const datum = opportunityDataByPoint[activePiePoint.id];
@@ -603,7 +599,7 @@ export function InfrastructureScatterPlot({
     };
   }, [activePiePoint, opportunityDataByPoint]);
 
-  // 툴팁의 X·색 카드 라벨/값을 선택된 지표에 맞춰 동적으로 구성
+  
   const activeMetricCards = useMemo(() => {
     if (!activePiePoint) return null;
     const p = activePiePoint as ExtendedScatterDataItem;
@@ -654,7 +650,7 @@ export function InfrastructureScatterPlot({
     return { left: `${posX}px`, top: `${posY}px` };
   }, [mousePos, activePiePoint]);
 
-  // 빈 공간에서만 브러싱 시작 (점 위 클릭은 기존 클릭 핸들러가 처리)
+  
   const handleBrushStart = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!onBrushSelect) return;
     const target = e.target;
@@ -696,7 +692,7 @@ export function InfrastructureScatterPlot({
       const minY = Math.min(rect.y0, rect.y1);
       const maxY = Math.max(rect.y0, rect.y1);
 
-      // 미세 드래그(=클릭)는 선택 해제로 처리
+      
       if (maxX - minX < 5 && maxY - minY < 5) {
         onBrushSelect?.([]);
         return;

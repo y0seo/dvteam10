@@ -11,7 +11,7 @@ import {
   getMainOpportunityScores, 
   zToPercentileScore 
 } from "../data/opportunityData";
-import { getHeatmapColorFromRatio } from "../data/heatmapPalette"; // ✅ 히트맵 색상 함수 추가
+import { getHeatmapColorFromRatio } from "../data/heatmapPalette"; 
 
 const regionsInfo = [
   { id: "seoul", name: "서울" }, { id: "incheon", name: "인천" },
@@ -484,7 +484,7 @@ export function MainPage() {
         >
           <div className="px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-slate-50/80">
             <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-              🏆 입지기회도 순위
+              입지기회도 순위
               <span className="text-[11px] font-semibold text-gray-500 bg-white px-2 py-0.5 rounded-md border border-gray-200">
                 {currentProvinceName || "전국"}
               </span>
@@ -495,7 +495,7 @@ export function MainPage() {
               const isHovered = currentViewLevel === "national" ? hoveredRegion === item.id : hoveredSubRegion === item.id;
               const isSelected = currentViewLevel === "national" ? selectedRegion === item.id : selectedSubRegion === item.id;
               
-              // ✅ 지도 히트맵에 쓰이는 색상을 추출
+              
               const barColor = getHeatmapColorFromRatio(Math.max(0, Math.min(100, item.score)) * 0.01);
               
               return (
@@ -520,7 +520,7 @@ export function MainPage() {
                   <div className="w-6 text-center shrink-0">
                     <span 
                       className={`text-xs font-black ${index < 3 ? '' : 'text-gray-400'}`}
-                      style={{ color: index < 3 ? barColor : undefined }} // 상위 3위는 바 색상과 동일하게 포인트 부여
+                      style={{ color: index < 3 ? barColor : undefined }} 
                     >
                       {index + 1}
                     </span>
@@ -533,7 +533,7 @@ export function MainPage() {
                       className="h-full rounded-full transition-all duration-500"
                       style={{ 
                         width: `${Math.max(0, Math.min(100, item.score))}%`,
-                        backgroundColor: barColor // ✅ 바 색상을 지도 히트맵과 완전히 일치시킴
+                        backgroundColor: barColor
                       }} 
                     />
                   </div>
