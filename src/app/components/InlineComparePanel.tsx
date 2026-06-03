@@ -261,7 +261,7 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
             region,
             regionIndex,
             count,
-            units: Math.round(count / VISITORS_PER_FLOW_UNIT),
+            units: Math.ceil(count / VISITORS_PER_FLOW_UNIT),
           };
         })
         .filter((flow) => flow.count > 0 && flow.units > 0);
