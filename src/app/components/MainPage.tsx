@@ -305,7 +305,7 @@ export function MainPage() {
               <div className="absolute top-16 right-0 w-64 bg-white/95 backdrop-blur-md rounded-xl shadow-xl border border-[#8b5cf6]/20 p-4">
                 <div className="flex justify-between items-center mb-1">
                   <h4 className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                    🎯 평가 지표 우선순위
+                    평가 지표 우선순위
                   </h4>
                   <button onClick={() => setIsRankOpen(false)} className="text-gray-400 hover:text-gray-600">
                     <X className="w-4 h-4" />
@@ -440,7 +440,7 @@ export function MainPage() {
             regionsInfo={regionsInfo}
             selectedComparePointIds={compareScatterPointIds}
             isCompareMode={isCompareMode}
-            weightMap={weightMap}
+            opportunityDataByPoint={dynamicAllDetailOpportunityData}
             onDataPointHover={handleScatterHover}
             onDataPointClick={handleScatterClick}
             onBrushSelect={handleBrushSelect}

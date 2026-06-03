@@ -17,11 +17,9 @@ import {
 } from "recharts";
 import { getScatterData, type ScatterDataItem } from "../data/infrastructureData";
 import {
-  getDistrictVisitorGrowthRates,
   getDistrictVisitorTotals,
 } from "../data/visitorData";
 import { getAccommodationSpending } from "../data/comparisonData";
-import { getDetailOpportunityScores, zToPercentileScore } from "../data/opportunityData";
 
 interface InfrastructureScatterPlotProps {
   currentViewLevel: string;
@@ -33,8 +31,7 @@ interface InfrastructureScatterPlotProps {
   regionsInfo: { id: string; name: string }[];
   selectedComparePointIds?: string[];
   isCompareMode?: boolean;
-  // ✅ 메인 페이지에서 조작한 가중치를 받아오기 위한 Prop 추가
-  weightMap?: Record<string, number>;
+  opportunityDataByPoint?: Record<string, any>;
   onDataPointClick?: (item: ScatterDataItem) => void;
   onDataPointHover?: (item: ScatterDataItem | null) => void;
   // 박스 드래그 브러싱: 선택된 점 id 목록을 상위로 전달 (지도 cross-highlight)
@@ -47,24 +44,10 @@ interface InfrastructureScatterPlotProps {
 const HOVERED_POINT_COLOR = "#ab418f"; // amber-400 — 부드러운 황금
 const SELECTED_POINT_COLOR = "#d97706"; // amber-600 — 진한 황금 (차분)
 const GLOW_COLOR = "#fef3c7"; // amber-100 — 매우 옅은 후광
-// 장바구니: muted violet (lavender 톤)
-const COMPARE_SELECTED_COLOR = "#8b5cf6"; // violet-500 (한 단계 옅게)
+// 장바구니 선택 stroke: 산점도 공급포화도 팔레트와 겹치지 않는 고대비 색상
+const REGION_COLORS = ["#0f766e", "#facc15", "#111827"];
 
-// 버블 색상 = 평균 지가 — 저렴할수록 청록/녹(안전), 비쌀수록 주황~빨강(경고)
-const LANDPRICE_PALETTE = [
-  "#1a9850", // 0 저렴 (안전)
-  "#4cb05f", // 1
-  "#7ac46f", // 2
-  "#a6d96a", // 3
-  "#d9ed8b", // 4
-  "#fee08b", // 5
-  "#fdbe6f", // 6
-  "#f88d52", // 7
-  "#e34933", // 8
-  "#c5151b", // 9 비쌈 (경고)
-];
-
-// 버블 색상(신규) = 숙박업소 수 — 적을수록 블루오션(파랑), 많을수록 레드오션(빨강)
+// 버블 색상 = 공급포화도 — 낮을수록 블루오션(파랑), 높을수록 레드오션(빨강)
 const OCEAN_PALETTE = [
   "#1d4ed8", // 0 블루오션 (경쟁 매우 적음)
   "#3b82f6", // 1
@@ -81,8 +64,8 @@ const OCEAN_PALETTE = [
 // 자본금 슬라이더 필터: 100평(약 330㎡) 기준 토지 매입가 환산용 상수
 const BASE_AREA_M2 = 330; // 100평 ≈ 330㎡
 
-// 분포가 극단적으로 우측 꼬리(수도권 쏠림)라 선형/sqrt 매핑은 다수를 한 구석에
-// 뭉치게 만든다. → 위치·크기·색을 모두 "현재 화면 기준 백분위"로 변환해 균등 분산시킨다.
+// 분포가 극단적으로 우측 꼬리(수도권 쏠림)라 실제값만 보면 다수가 한 구석에 뭉친다.
+// 백분위 모드에서는 위치와 색을 "전국 기준 백분위"로 변환해 스케일을 고정한다.
 function percentilesOf(values: number[]): (v: number) => number {
   const sorted = [...values].sort((a, b) => a - b);
   const n = sorted.length;
@@ -98,25 +81,7 @@ function percentilesOf(values: number[]): (v: number) => number {
   };
 }
 
-// 로그축 도메인 안전화: 0/음수 방지, min===max(단일 구역)일 때 양쪽으로 벌려 NaN 방지.
-// 비율 지표(1인당/포화도)는 1 미만일 수 있어 바닥을 1이 아닌 극소값으로 둔다.
-function safeLogDomain(min: number, max: number): [number, number] {
-  const lo = Math.max(1e-6, min);
-  const hi = Math.max(lo, max);
-  if (lo === hi) return [lo / 2, hi * 2];
-  return [lo, hi];
-}
-
-// 백분위(0~100) → 팔레트 색. 분위수 기반이라 녹→빨강이 고르게 분포한다.
-function getLandPriceColorByPct(pct: number): string {
-  const idx = Math.min(
-    Math.floor((pct / 100) * LANDPRICE_PALETTE.length),
-    LANDPRICE_PALETTE.length - 1,
-  );
-  return LANDPRICE_PALETTE[Math.max(0, idx)];
-}
-
-// 숙박업소 수 백분위(0~100) → 블루↔레드오션 색. 낮을수록 파랑(블루오션), 높을수록 빨강(레드오션).
+// 공급포화도 백분위(0~100) → 블루↔레드오션 색. 낮을수록 파랑(블루오션), 높을수록 빨강(레드오션).
 function getOceanColorByPct(pct: number): string {
   const idx = Math.min(
     Math.floor((pct / 100) * OCEAN_PALETTE.length),
@@ -133,43 +98,28 @@ function formatCompactTick(value: number): string {
   return value.toLocaleString();
 }
 
-// X축 소비액 지표 / 색상 지표 토글 라벨
-type XMetric = "spending" | "perVisitor" | "perAcc";
-type ColorMetric = "accommodation" | "saturation";
-
-const X_METRIC_LABEL: Record<XMetric, string> = {
-  spending: "숙박 소비액",
-  perVisitor: "1인당 소비액",
-  perAcc: "업소당 소비액",
-};
-const COLOR_METRIC_LABEL: Record<ColorMetric, string> = {
-  accommodation: "숙박업소 수",
-  saturation: "공급포화도",
-};
-
 type ExtendedScatterDataItem = ScatterDataItem & {
   spending: number;
   visitors: number;
   safety: number;
 };
 
-// 현재 화면 기준 백분위·로그용 파생 필드까지 포함한 점 데이터
+// 전국 기준 백분위·실제값 파생 필드까지 포함한 점 데이터
 type RankedScatterDataItem = ExtendedScatterDataItem & {
-  xBase: number; // 현재 X 지표 원값 (소비액 / 1인당 / 업소당)
-  xPct: number; // X 지표 백분위
+  perVisitorSpending: number; // 1인당 소비액(천원/명)
+  xPct: number; // 1인당 소비액 백분위
   yPct: number; // 관광객 백분위
   pricePct: number; // 지가 백분위 (보조)
   safetyPct: number; // (구) 미사용
-  colorBase: number; // 현재 색 지표 원값 (업소수 / 공급포화도)
-  colorPct: number; // 색 지표 백분위 (블루↔레드오션)
+  saturation: number; // 공급포화도(숙박업소 수 / 방문자 수)
+  colorPct: number; // 공급포화도 백분위 (블루↔레드오션)
   landCostEok: number; // 100평 기준 토지비 환산(억) — 자본금 슬라이더 필터
-  xLog: number; // X 로그축용 (양수 바닥 처리)
-  visitorsLog: number;
 };
 
 type HighlightedScatterPointPayload = RankedScatterDataItem & {
   highlightState?: "selected" | "hovered" | null;
   isCompareSelected?: boolean;
+  compareIndex?: number;
   isBrushed?: boolean;
   isDimmed?: boolean;
   isLocked?: boolean; // 자본금 초과 → 잠금(흐림·선택 불가)
@@ -188,11 +138,6 @@ interface HighlightedScatterPointProps {
 
 let cachedVisitorData: Record<string, number> | null = null;
 let cachedScatterData: ExtendedScatterDataItem[] = [];
-let cachedMaxPrice = 1;
-let cachedMaxAccommodation = 1;
-let cachedMaxSpending = 1;
-let cachedMaxVisitors = 1;
-let cachedMaxSafety = 1;
 
 // 성장률 ▲(빨강 상승) / ▼(파랑 하락) 아이콘
 function GrowthIndicator({ rate }: { rate: number }) {
@@ -240,11 +185,6 @@ function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[
     scatter = [...scatter, ...mappedData];
   });
 
-  cachedMaxPrice = Math.ceil(Math.max(...scatter.map((s) => s.price), 1) * 1.05);
-  cachedMaxAccommodation = Math.ceil(Math.max(...scatter.map((s) => s.accommodation), 1) * 1.05);
-  cachedMaxSpending = Math.max(...scatter.map((s) => s.spending), 1);
-  cachedMaxVisitors = Math.max(...scatter.map((s) => s.visitors), 1);
-
   // 버블 크기 = 경쟁 안전도: 최댓값 감산법 (전국 최댓값 − 현재 값 + 보정상수).
   // 경쟁 숙박업소가 적은 블루오션일수록 버블이 커지도록 역산한다.
   const maxAccommodationRaw = Math.max(...scatter.map((s) => s.accommodation), 0);
@@ -252,7 +192,6 @@ function initializeNationwideDataOnce(regionsInfo: { id: string; name: string }[
   scatter.forEach((s) => {
     s.safety = maxAccommodationRaw - s.accommodation + safetyConstant;
   });
-  cachedMaxSafety = maxAccommodationRaw + safetyConstant;
 
   cachedVisitorData = visitors;
   cachedScatterData = scatter;
@@ -276,6 +215,8 @@ function HighlightedScatterPoint({
   const isBrushed = Boolean(payload?.isBrushed);
   const isDimmed = Boolean(payload?.isDimmed);
   const isLocked = Boolean(payload?.isLocked);
+  const compareColor =
+    payload?.compareIndex != null ? REGION_COLORS[payload.compareIndex % REGION_COLORS.length] : null;
 
   const baseRadius = size ? Math.sqrt(size) : 6;
   const radius = isSelected || isHovered ? baseRadius + 3 : isBrushed ? baseRadius + 2 : baseRadius;
@@ -285,10 +226,12 @@ function HighlightedScatterPoint({
     ? SELECTED_POINT_COLOR
     : isHovered
       ? HOVERED_POINT_COLOR
+      : compareColor
+        ? compareColor
       : isBrushed
         ? "#f97316"
         : "#b3b3b33a";
-  const strokeWidth = isSelected || isHovered || isBrushed ? 3 : 1.5;
+  const strokeWidth = compareColor ? 5 : isSelected || isHovered || isBrushed ? 3 : 1.5;
 
   return (
     <g
@@ -334,29 +277,6 @@ function HighlightedScatterPoint({
         strokeWidth={isLocked ? 0 : strokeWidth}
         opacity={isLocked ? 0.12 : isDimmed ? 0.18 : 1}
       />
-      {payload?.isCompareSelected && (
-        <g pointerEvents="none">
-          <circle
-            cx={cx}
-            cy={cy}
-            r={Math.max(radius + 6, 12)}
-            fill={COMPARE_SELECTED_COLOR}
-            stroke="#ffffff"
-            strokeWidth={2}
-          />
-          <text
-            x={cx}
-            y={cy + 0.7}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={Math.max(radius + 5, 13)}
-            fontWeight={900}
-            fill="#ffffff"
-          >
-            ✓
-          </text>
-        </g>
-      )}
     </g>
   );
 }
@@ -367,7 +287,7 @@ export function InfrastructureScatterPlot({
   regionsInfo,
   selectedComparePointIds = [],
   isCompareMode = false,
-  weightMap, // 메인 페이지로부터 가중치를 받아옴
+  opportunityDataByPoint = {},
   onDataPointClick,
   onDataPointHover,
   onBrushSelect,
@@ -382,12 +302,7 @@ export function InfrastructureScatterPlot({
 
   const [hoveredPoint, setHoveredPoint] = useState<ScatterDataItem | null>(null);
   const [clickedPointId, setClickedPointId] = useState<string | null>(null);
-  // 축 변환 모드: 백분위 순위 / 로그 / 선형(sqrt)
-  const [axisMode, setAxisMode] = useState<"percentile" | "log" | "sqrt">("percentile");
-  // X축 소비액 지표: 총액 / 1인당(÷방문자) / 업소당(÷숙박업소수)
-  const [xMetric, setXMetric] = useState<XMetric>("spending");
-  // 색상 지표: 원시 숙박업소 수 / 공급포화도(업소수÷방문자)
-  const [colorMetric, setColorMetric] = useState<ColorMetric>("accommodation");
+  const [axisMode, setAxisMode] = useState<"percentile" | "actual">("percentile");
   // 자본금(억) 슬라이더 — null이면 "전체"(필터 없음, 화면 최대치 추적)
   const [capitalEok, setCapitalEok] = useState<number | null>(null);
   
@@ -437,54 +352,59 @@ export function InfrastructureScatterPlot({
     return () => clearTimeout(timer);
   }, [activePiePoint]);
 
-  // 현재 화면(전국 또는 특정 시·도)에 보이는 점들만 추려 백분위·로그 파생값을 계산.
-  // 백분위는 "현재 화면 기준"이라 어떤 화면에서도 균등 분산된다.
+  const nationalScale = useMemo(() => {
+    const perVisitorSpendingOf = (d: ExtendedScatterDataItem) =>
+      d.spending / Math.max(d.visitors, 1);
+    const saturationOf = (d: ExtendedScatterDataItem) =>
+      d.accommodation / Math.max(d.visitors, 1);
+    const xValues = scatterData.map(perVisitorSpendingOf);
+    const yValues = scatterData.map((d) => d.visitors);
+    const saturationValues = scatterData.map(saturationOf);
+    const landCostValues = scatterData.map((d) => (d.price * BASE_AREA_M2) / 10000);
+
+    return {
+      perVisitorSpendingOf,
+      saturationOf,
+      xRank: percentilesOf(xValues),
+      yRank: percentilesOf(yValues),
+      priceRank: percentilesOf(scatterData.map((d) => d.price)),
+      colorRank: percentilesOf(saturationValues),
+      xMax: Math.max(...xValues, 1),
+      yMax: Math.max(...yValues, 1),
+      landCostMin: Math.max(1, Math.floor(Math.min(...landCostValues))),
+      landCostMax: Math.max(2, Math.ceil(Math.max(...landCostValues))),
+    };
+  }, [scatterData]);
+
+  // 화면에는 현재 선택 범위의 점만 보여주되, 위치·색·축 범위는 전국 기준으로 고정한다.
   const rankedViewData = useMemo<RankedScatterDataItem[]>(() => {
     const view = scatterData.filter((entry) => {
       if (!selectedRegion || selectedRegion === "national") return true;
       return entry.id.startsWith(`${selectedRegion}-`);
     });
-    // 선택된 지표에 따른 X·색 원값. 분모가 0인 구역은 1로 바닥 처리해 NaN/∞ 방지.
-    const xBaseOf = (d: ExtendedScatterDataItem) => {
-      if (xMetric === "perVisitor") return d.spending / Math.max(d.visitors, 1);
-      if (xMetric === "perAcc") return d.spending / Math.max(d.accommodation, 1);
-      return d.spending;
-    };
-    const colorBaseOf = (d: ExtendedScatterDataItem) => {
-      if (colorMetric === "saturation") return d.accommodation / Math.max(d.visitors, 1);
-      return d.accommodation;
-    };
-    const xRank = percentilesOf(view.map(xBaseOf));
-    const yRank = percentilesOf(view.map((d) => d.visitors));
-    const priceRank = percentilesOf(view.map((d) => d.price));
-    const colorRank = percentilesOf(view.map(colorBaseOf));
     return view.map((d) => {
-      const xBase = xBaseOf(d);
-      const colorBase = colorBaseOf(d);
+      const perVisitorSpending = nationalScale.perVisitorSpendingOf(d);
+      const saturation = nationalScale.saturationOf(d);
       return {
         ...d,
-        xBase,
-        xPct: Math.round(xRank(xBase)),
-        yPct: Math.round(yRank(d.visitors)),
-        pricePct: priceRank(d.price),
+        perVisitorSpending,
+        xPct: Math.round(nationalScale.xRank(perVisitorSpending)),
+        yPct: Math.round(nationalScale.yRank(d.visitors)),
+        pricePct: nationalScale.priceRank(d.price),
         safetyPct: 0,
-        colorBase,
-        colorPct: Math.round(colorRank(colorBase)),
+        saturation,
+        colorPct: Math.round(nationalScale.colorRank(saturation)),
         landCostEok: (d.price * BASE_AREA_M2) / 10000,
-        xLog: Math.max(xBase, 1e-6),
-        visitorsLog: Math.max(d.visitors, 1),
       };
     });
-  }, [scatterData, selectedRegion, xMetric, colorMetric]);
+  }, [scatterData, selectedRegion, nationalScale]);
 
-  // 자본금 슬라이더 범위(억): 현재 화면 점들의 100평 토지비 환산 min/max
+  // 자본금 슬라이더 범위(억): 전국 시군구 기준으로 고정
   const capitalBounds = useMemo(() => {
-    if (rankedViewData.length === 0) return { min: 1, max: 100 };
-    const costs = rankedViewData.map((d) => d.landCostEok);
-    const min = Math.max(1, Math.floor(Math.min(...costs)));
-    const max = Math.max(min + 1, Math.ceil(Math.max(...costs)));
+    const min = nationalScale.landCostMin;
+    const max = Math.max(min + 1, nationalScale.landCostMax);
     return { min, max };
-  }, [rankedViewData]);
+  }, [nationalScale]);
 
   // 실효 자본금: 미설정(null)이면 화면 최대치 → 아무것도 잠그지 않음
   const effectiveCapital = capitalEok ?? capitalBounds.max;
@@ -493,20 +413,12 @@ export function InfrastructureScatterPlot({
     [rankedViewData, effectiveCapital],
   );
 
-  // 로그축 도메인 (현재 화면 min/max, 0은 1로 바닥 처리)
   const axisBounds = useMemo(() => {
-    if (rankedViewData.length === 0) {
-      return { xMin: 1, xMax: cachedMaxSpending, yMin: 1, yMax: cachedMaxVisitors };
-    }
-    const xs = rankedViewData.map((d) => d.xLog);
-    const ys = rankedViewData.map((d) => d.visitorsLog);
     return {
-      xMin: Math.min(...xs),
-      xMax: Math.max(...xs),
-      yMin: Math.min(...ys),
-      yMax: Math.max(...ys),
+      xMax: nationalScale.xMax,
+      yMax: nationalScale.yMax,
     };
-  }, [rankedViewData]);
+  }, [nationalScale]);
 
   const highlightedScatterData = useMemo(
     () =>
@@ -523,7 +435,8 @@ export function InfrastructureScatterPlot({
           const isChartClicked = clickedPointId === entry.id;
           const isMapSelected = selectedSubRegion ? entry.id === `${selectedRegion}-${selectedSubRegion}` : false;
           const isSelected = isChartClicked || isMapSelected;
-          const isCompareSelected = selectedComparePointIds.includes(entry.id);
+          const compareIndex = selectedComparePointIds.indexOf(entry.id);
+          const isCompareSelected = compareIndex !== -1;
           const isBrushed = brushedIds.includes(entry.id);
           const hasBrush = brushedIds.length > 0;
 
@@ -538,6 +451,7 @@ export function InfrastructureScatterPlot({
               | "hovered"
               | null,
             isCompareSelected,
+            compareIndex: isCompareSelected ? compareIndex : undefined,
             isBrushed,
             isLocked,
             // hover 중이거나 브러싱 선택이 있으면, 보호 대상이 아닌 점은 흐리게
@@ -574,10 +488,9 @@ export function InfrastructureScatterPlot({
     ],
   );
 
-  const xMetricLabel = X_METRIC_LABEL[xMetric];
-  const colorMetricLabel = COLOR_METRIC_LABEL[colorMetric];
+  const xMetricLabel = "1인당 소비액";
+  const colorMetricLabel = "공급포화도";
 
-  // 축 모드별 설정 (백분위 순위 / 로그 / 선형 sqrt). 라벨은 선택된 X 지표를 반영.
   const xConf = useMemo(() => {
     if (axisMode === "percentile") {
       return {
@@ -586,28 +499,18 @@ export function InfrastructureScatterPlot({
         domain: [0, 100] as [number, number],
         ticks: [0, 25, 50, 75, 100] as number[] | undefined,
         tickFormatter: (v: number) => `${v}`,
-        label: `${xMetricLabel} 순위(%) →`,
-      };
-    }
-    if (axisMode === "log") {
-      return {
-        dataKey: "xLog",
-        scale: "log" as const,
-        domain: safeLogDomain(axisBounds.xMin, axisBounds.xMax),
-        ticks: undefined as number[] | undefined,
-        tickFormatter: formatCompactTick,
-        label: `${xMetricLabel} (로그) →`,
+        label: "1인당 소비액 순위(%) →",
       };
     }
     return {
-      dataKey: "xBase",
-      scale: "sqrt" as const,
-      domain: [0, Math.max(axisBounds.xMax, 1)] as [number, number],
+      dataKey: "perVisitorSpending",
+      scale: "linear" as const,
+      domain: [0, Math.max(axisBounds.xMax * 1.05, 1)] as [number, number],
       ticks: undefined as number[] | undefined,
-      tickFormatter: formatCompactTick,
-      label: `${xMetricLabel} →`,
+      tickFormatter: (value: number) => `${value.toFixed(value >= 10 ? 0 : 1)}`,
+      label: "1인당 소비액 (천원/명) →",
     };
-  }, [axisMode, axisBounds, xMetricLabel]);
+  }, [axisMode, axisBounds]);
 
   const yConf = useMemo(() => {
     if (axisMode === "percentile") {
@@ -620,20 +523,10 @@ export function InfrastructureScatterPlot({
         label: "관광객 수 순위(%) ↑",
       };
     }
-    if (axisMode === "log") {
-      return {
-        dataKey: "visitorsLog",
-        scale: "log" as const,
-        domain: safeLogDomain(axisBounds.yMin, axisBounds.yMax),
-        ticks: undefined as number[] | undefined,
-        tickFormatter: formatCompactTick,
-        label: "관광객 수 (수요·로그) ↑",
-      };
-    }
     return {
       dataKey: "visitors",
-      scale: "sqrt" as const,
-      domain: [0, cachedMaxVisitors] as [number, number],
+      scale: "linear" as const,
+      domain: [0, Math.max(axisBounds.yMax * 1.05, 1)] as [number, number],
       ticks: undefined as number[] | undefined,
       tickFormatter: formatCompactTick,
       label: "관광객 수 (수요) ↑",
@@ -662,45 +555,13 @@ export function InfrastructureScatterPlot({
   // ✅ 툴팁용 메타 데이터 실시간 연산 로직
   const activePointMeta = useMemo(() => {
     if (!activePiePoint) return null;
-    const idParts = activePiePoint.id.split("-");
-    const provinceId = idParts[0];
-    const districtName = activePiePoint.name;
-
-    const growthRates = getDistrictVisitorGrowthRates(provinceId);
-    const growthRate = growthRates[districtName] || 0;
-
-    const opportunityScores = getDetailOpportunityScores(provinceId);
-    const datum = opportunityScores[districtName];
-
-    let finalOpportunityScore = datum?.opportunityScore || 0;
-
-    // 만약 MainPage에서 weightMap을 넘겨주었다면 산점도 툴팁에서도 실시간 동적 계산
-    if (datum && weightMap && Object.keys(weightMap).length > 0) {
-      const growthZ = growthRate / 0.15;
-      const visitorZ = datum.nationalZ?.visitor ?? 0;
-      const spendingZ = datum.nationalZ?.spending ?? 0;
-      const priceZ = datum.nationalZ?.price ?? 0;
-      const compZ = datum.nationalZ?.accommodation ?? 0;
-
-      const dynamicWeightSumSq = Object.values(weightMap).reduce((sum, w) => sum + w * w, 0);
-      const adjustmentFactor = Math.sqrt(dynamicWeightSumSq) || 1;
-
-      const rawFinalZ =
-        (weightMap["growth"] * growthZ) +
-        (weightMap["visitor"] * visitorZ) +
-        (weightMap["spending"] * spendingZ) -
-        (weightMap["price"] * priceZ) -
-        (weightMap["competition"] * compZ);
-
-      const finalZ = rawFinalZ / adjustmentFactor;
-      finalOpportunityScore = zToPercentileScore(finalZ);
-    }
+    const datum = opportunityDataByPoint[activePiePoint.id];
 
     return {
-      growthRate,
-      opportunityScore: finalOpportunityScore,
+      growthRate: datum?.growthRate ?? 0,
+      opportunityScore: datum?.opportunityScore ?? 0,
     };
-  }, [activePiePoint, weightMap]);
+  }, [activePiePoint, opportunityDataByPoint]);
 
   // 툴팁의 X·색 카드 라벨/값을 선택된 지표에 맞춰 동적으로 구성
   const activeMetricCards = useMemo(() => {
@@ -710,27 +571,13 @@ export function InfrastructureScatterPlot({
     const visitors = p.visitors || 0;
     const acc = p.accommodation || 0;
 
-    const xLabel =
-      xMetric === "perVisitor"
-        ? "1인당 소비액 (X)"
-        : xMetric === "perAcc"
-          ? "업소당 소비액 (X)"
-          : "숙박 소비액 (X·시장성)";
-    const xValue =
-      xMetric === "perVisitor"
-        ? `${(spending / Math.max(visitors, 1)).toFixed(1)}천원/명`
-        : xMetric === "perAcc"
-          ? `${Math.round(spending / Math.max(acc, 1)).toLocaleString()}천원/업소`
-          : `${Math.round(spending / 10).toLocaleString()}만원`;
-
-    const colorLabel = colorMetric === "saturation" ? "공급포화도 (색)" : "숙박업소 수 (색·경쟁)";
-    const colorValue =
-      colorMetric === "saturation"
-        ? `${((acc / Math.max(visitors, 1)) * 10000).toFixed(1)}개/만명`
-        : `${acc.toLocaleString()}개`;
+    const xLabel = "1인당 소비액 (X)";
+    const xValue = `${(spending / Math.max(visitors, 1)).toFixed(1)}천원/명`;
+    const colorLabel = "공급포화도 (색)";
+    const colorValue = `${((acc / Math.max(visitors, 1)) * 10000).toFixed(1)}개/만명`;
 
     return { xLabel, xValue, colorLabel, colorValue };
-  }, [activePiePoint, xMetric, colorMetric]);
+  }, [activePiePoint]);
 
   const handlePointHover = (item: ScatterDataItem | null) => {
     setHoveredPoint(item);
@@ -855,8 +702,7 @@ export function InfrastructureScatterPlot({
               {(
                 [
                   ["percentile", "백분위"],
-                  ["log", "로그"],
-                  ["sqrt", "선형"],
+                  ["actual", "실제"],
                 ] as const
               ).map(([mode, label]) => (
                 <button
@@ -874,52 +720,10 @@ export function InfrastructureScatterPlot({
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
-              <span className="px-1 text-[10px] font-bold text-slate-400">X</span>
-              {(
-                [
-                  ["spending", "총액"],
-                  ["perVisitor", "1인당"],
-                  ["perAcc", "업소당"],
-                ] as const
-              ).map(([m, label]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setXMetric(m)}
-                  className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${
-                    xMetric === m
-                      ? "bg-white text-slate-800 shadow-sm"
-                      : "text-slate-400 hover:text-slate-600"
-                  }`}
-                  title="X축 소비액 지표 (총액 / 1인당 / 업소당)"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
-              <span className="px-1 text-[10px] font-bold text-slate-400">색</span>
-              {(
-                [
-                  ["accommodation", "업소수"],
-                  ["saturation", "포화도"],
-                ] as const
-              ).map(([m, label]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setColorMetric(m)}
-                  className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-colors ${
-                    colorMetric === m
-                      ? "bg-white text-slate-800 shadow-sm"
-                      : "text-slate-400 hover:text-slate-600"
-                  }`}
-                  title="색상 지표 (원시 업소수 / 공급포화도)"
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1">
+              <span className="text-[10px] font-bold text-slate-500">X: 1인당 소비액</span>
+              <span className="text-[10px] font-bold text-slate-300">·</span>
+              <span className="text-[10px] font-bold text-slate-500">색: 포화도</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-semibold text-blue-600">블루오션</span>
@@ -934,7 +738,7 @@ export function InfrastructureScatterPlot({
 
         {/* 자본금 슬라이더 — 100평 토지비 환산이 자본금을 넘는 지역은 잠금 */}
         <div className="mt-2.5 flex items-center gap-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
-          <span className="text-[11px] font-bold text-amber-700 whitespace-nowrap shrink-0">💰 자본금</span>
+          <span className="text-[11px] font-bold text-amber-700 whitespace-nowrap shrink-0"> 자본금</span>
           <input
             type="range"
             min={capitalBounds.min}

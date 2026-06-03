@@ -26,7 +26,7 @@ import {
 import { getDistrictNationalities } from "../data/nationality";
 import { provinceIdToCsvName } from "../data/visitorData";
 
-const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
+const REGION_COLORS = ["#0f766e", "#facc15", "#111827"];
 
 // 국적별 색상 (국가 식별용 카테고리 팔레트, 미등록 국가는 회색 폴백)
 const COUNTRY_COLORS: Record<string, string> = {
@@ -52,7 +52,7 @@ const COUNTRY_COLORS: Record<string, string> = {
 };
 const FALLBACK_COUNTRY_COLOR = "#94A3B8";
 const countryColor = (name: string) => COUNTRY_COLORS[name] || FALLBACK_COUNTRY_COLOR;
-const VISITORS_PER_FLOW_UNIT = 2000;
+const VISITORS_PER_FLOW_UNIT = 1000;
 const FLOW_VIEWBOX = { width: 760, height: 260 };
 
 const getFlowDuration = (unitIndex: number, countryIndex: number) =>
@@ -446,7 +446,7 @@ export function InlineComparePanel({ regions, onClose }: InlineComparePanelProps
           <div>
             <p className="text-[13px] font-bold text-gray-700">외국인 국적 구성 비교</p>
             <span className="text-[10px] font-semibold text-gray-400">
-              왼쪽: 선택 지역 전체 top3 국적 · 오른쪽: 장바구니 지역 · 유닛 1개 = 2025년 평균 2천명
+              왼쪽: 선택 지역 전체 top3 국적 · 오른쪽: 장바구니 지역 · 유닛 1개 = 2025년 1천명
             </span>
           </div>
           <span className="shrink-0 rounded-md bg-gray-100 px-2 py-1 text-[10px] font-black text-gray-500">

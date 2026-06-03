@@ -72,7 +72,10 @@ export function KoreaMap({ onRegionClick, onRegionHover, onRegionDoubleClick, se
   const dynamicStyles = useMemo(() => {
     let styles = "";
     regionsInfo.forEach((region) => {
-      const heatmapColor = getHeatmapColorFromRatio(opportunityData[region.id]?.opportunityScore*0.01);
+      const score = opportunityData[region.id]?.opportunityScore;
+      const heatmapColor = getHeatmapColorFromRatio(
+        typeof score === "number" ? score * 0.01 : undefined,
+      );
       const isSelected = selectedRegion === region.id;
       const isHovered = hoveredRegion === region.id;
       const isBrushed = brushedRegions.includes(region.id);

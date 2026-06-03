@@ -37,7 +37,7 @@ const regionNames: Record<string, string> = {
   daegu: "대구", gyeongnam: "경남", ulsan: "울산", busan: "부산", jeju: "제주"
 };
 
-const REGION_COLORS = ["#2563eb", "#10b981", "#f97316"];
+const REGION_COLORS = ["#0f766e", "#facc15", "#111827"];
 
 const getSvgAttribute = (tag: string, attribute: string) => {
   const match = tag.match(new RegExp(`${attribute}="([^"]+)"`));
@@ -109,7 +109,10 @@ export function DetailRegionMap({ regionId, onBack, opportunityData, onSubRegion
   const dynamicStyles = useMemo(() => {
     let styles = "";
     subRegionIds.forEach((id) => {
-      const heatmapColor = getHeatmapColorFromRatio((opportunityData[id]?.opportunityScore || 0) * 0.01);
+      const score = opportunityData[id]?.opportunityScore;
+      const heatmapColor = getHeatmapColorFromRatio(
+        typeof score === "number" ? score * 0.01 : undefined,
+      );
       const isSelected = selectedSubRegion === id;
       
       const compareIndex = selectedCompareSubRegions.indexOf(id);
